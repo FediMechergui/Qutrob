@@ -5,6 +5,7 @@
 import rootsData from "../../ابدذر.json";
 import rootsDataExtended from "../../ز الى ع.json";
 import qutufData from "../../القطوف.json";
+import { shuffle } from "../utils/random";
 
 // All 28 Arabic letters for random generation
 export const ARABIC_LETTERS = [
@@ -103,7 +104,9 @@ export interface RootInfo {
 }
 
 // Helper function to convert root format: "أ ب ب" -> "أبب"
-function normalizeRoot(root: string): string {
+// Exported so round generation applies the exact same normalization
+// that was used to build the database.
+export function normalizeRoot(root: string): string {
   return root.replace(/\s+/g, "").replace(/هـ/g, "ه");
 }
 
@@ -301,6 +304,6 @@ export function getLettersWithValidRoots(
 
 // Get completely random letters (may or may not have valid roots)
 export function getRandomLetters(): [string, string, string] {
-  const shuffled = [...ARABIC_LETTERS].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle(ARABIC_LETTERS);
   return [shuffled[0], shuffled[1], shuffled[2]];
 }

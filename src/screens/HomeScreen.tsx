@@ -18,19 +18,15 @@ import {
   BORDER_RADIUS,
   SPACING,
 } from "../constants/theme";
-import { getHighScore, getCompletedLevels } from "../utils/storage";
-import { getUnlockedCards } from "../utils/gameStorage";
-import { getGlobalScores } from "../services/database";
-import { GAME_LEVELS } from "../data/arabicRoots";
+import {
+  getGlobalScores,
+  getCompletedLevels,
+  getUnlockedCards,
+  UnlockedCard,
+} from "../services/database";
 import {
   scaleFontSize,
-  moderateScale,
-  hp,
-  wp,
   isShortScreen,
-  isMediumHeight,
-  getResponsiveSize,
-  SCREEN,
 } from "../utils/responsive";
 
 const { width, height } = Dimensions.get("window");
@@ -46,7 +42,6 @@ const COMPACT_SPACING = {
 
 interface HomeScreenProps {
   onStartGame: (resume?: boolean) => void;
-  onSelectLevel: (levelIndex: number) => void;
   onStartQutrab: (resume?: boolean) => void;
   onOpenVideoArchive?: () => void;
   playerName?: string | null;
@@ -58,7 +53,6 @@ interface HomeScreenProps {
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onStartGame,
-  onSelectLevel,
   onStartQutrab,
   onOpenVideoArchive,
   playerName,
@@ -67,12 +61,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   playerId,
   refreshKey = 0,
 }) => {
-  const [highScore, setHighScore] = useState(0);
-  const [completedLevels, setCompletedLevels] = useState<string[]>([]);
-  const [showLevelSelect, setShowLevelSelect] = useState(false);
+  const [completedLevelsCount, setCompletedLevelsCount] = useState(0);
   const [totalScore, setTotalScore] = useState(0);
   const [totalStreak, setTotalStreak] = useState(0);
-  const [unlockedCards, setUnlockedCards] = useState<any[]>([]);
+  const [unlockedCards, setUnlockedCards] = useState<UnlockedCard[]>([]);
   const [showUnlockedModal, setShowUnlockedModal] = useState(false);
 
   useEffect(() => {
@@ -80,28 +72,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   }, [playerId, refreshKey]);
 
   const loadData = async () => {
-    const score = await getHighScore();
-    const levels = await getCompletedLevels();
+    if (!playerId) return;
 
-    setHighScore(score);
-    setCompletedLevels(levels);
-
-    // Load global scores from SQLite if playerId is available
-    if (playerId) {
-      const globalScore = await getGlobalScores(playerId);
-      if (globalScore) {
-        // Note: database returns snake_case properties
-        setTotalScore(globalScore.total_score);
-        setTotalStreak(globalScore.total_streak);
-      }
-    }
-
-    // Load unlocked cards for quick access
     try {
-      const cards = await getUnlockedCards();
+      const [globalScore, rootsLevels, qutrabLevels, cards] =
+        await Promise.all([
+          getGlobalScores(playerId),
+          getCompletedLevels(playerId, "roots"),
+          getCompletedLevels(playerId, "qutrab"),
+          getUnlockedCards(playerId),
+        ]);
+
+      setTotalScore(globalScore.total_score);
+      setTotalStreak(globalScore.total_streak);
+      setCompletedLevelsCount(rootsLevels.length + qutrabLevels.length);
       setUnlockedCards(cards);
     } catch (e) {
-      setUnlockedCards([]);
+      console.error("Error loading home data:", e);
     }
   };
 
@@ -278,47 +265,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 {/* Level selection removed for unified flow */}
               </View>
 
-              {/* Level Selection */}
-              {showLevelSelect && (
-                <View style={styles.levelGrid}>
-                  {GAME_LEVELS.map((level, index) => {
-                    const isCompleted = completedLevels.includes(
-                      level.id.toString()
-                    );
-                    const isLocked =
-                      index > 0 &&
-                      !completedLevels.includes(
-                        GAME_LEVELS[index - 1].id.toString()
-                      );
-
-                    return (
-                      <TouchableOpacity
-                        key={level.id}
-                        style={[
-                          styles.levelButton,
-                          isCompleted && styles.levelCompleted,
-                          isLocked && styles.levelLocked,
-                        ]}
-                        onPress={() => !isLocked && onSelectLevel(index)}
-                        disabled={isLocked}
-                        activeOpacity={0.7}
-                      >
-                        <Text
-                          style={[
-                            styles.levelNumber,
-                            isCompleted && styles.levelNumberCompleted,
-                            isLocked && styles.levelNumberLocked,
-                          ]}
-                        >
-                          {isLocked ? "🔒" : level.id}
-                        </Text>
-                        {isCompleted && <Text style={styles.checkMark}>✓</Text>}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-
               {/* Video Archive Button */}
               {onOpenVideoArchive && (
                 <TouchableOpacity
@@ -341,7 +287,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 </View>
                 <Text style={styles.footerText}>اكتشف جمال اللغة العربية</Text>
                 <Text style={styles.completedText}>
-                  {completedLevels.length} / {GAME_LEVELS.length} مستوى مكتمل
+                  {completedLevelsCount} مستوى مكتمل
                 </Text>
               </View>
             </View>

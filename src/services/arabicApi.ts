@@ -10,8 +10,10 @@ import {
   generateAllPermutations,
   getRootInfo,
   findValidRoots,
+  normalizeRoot,
   VALID_ARABIC_ROOTS,
 } from "../data/arabicDatabase";
+import { shuffle } from "../utils/random";
 
 // Types
 export type Difficulty = "easy" | "medium" | "hard";
@@ -41,6 +43,8 @@ export interface RoundData {
   successMessages: { [key: string]: string };
   poetryExamples: { [key: string]: string };
   difficulty?: Difficulty;
+  // Normalized key of the source entry, used to avoid repeating questions
+  usedKey: string;
 }
 
 // Arabic proverbs for level completion
@@ -106,35 +110,41 @@ export function generateRoundData(difficulty: Difficulty, usedRoots?: Set<string
   try {
     const allEntries: any[] = (qutufData as any)?.Feuil1 || [];
 
-    // MIXED DIFFICULTY: Pick from ALL entries, not filtered by difficulty
-    // Exclude already-used roots to prevent repeats
+    // MIXED DIFFICULTY: Pick from ALL entries, not filtered by difficulty.
+    // Only entries whose normalized root has exactly 3 letters are playable
+    // (the same rule used when building the validation database), and
+    // already-used roots are excluded to prevent repeats.
+    const isPlayable = (e: any) =>
+      e && e["الجذر"] && normalizeRoot(e["الجذر"] as string).length === 3;
+
     let candidates = allEntries.filter((e) => {
-      if (!e || !e["الجذر"]) return false;
+      if (!isPlayable(e)) return false;
       if (usedRoots && usedRoots.size > 0) {
-        const rootStr = (e["الجذر"] as string).replace(/\s+/g, "");
-        return !usedRoots.has(rootStr);
+        return !usedRoots.has(normalizeRoot(e["الجذر"] as string));
       }
       return true;
     });
 
     // If all entries have been used, reset and allow all
     if (candidates.length === 0) {
-      candidates = allEntries.filter((e) => e && e["الجذر"]);
+      candidates = allEntries.filter(isPlayable);
     }
 
     // Shuffle candidates for random order
-    const shuffled = [...candidates].sort(() => Math.random() - 0.5);
+    const shuffled = shuffle(candidates);
 
     // Pick a random entry from ANY difficulty
     const entry = shuffled[0];
 
     // Parse root letters from the "الجذر" field. Example: "أ ب ب"
+    // Uses the shared normalization so letters always match the database key.
     let letters: [string, string, string] | null = null;
+    let primaryRoot: string | null = null;
     if (entry && entry["الجذر"]) {
-      const tokens = (entry["الجذر"] as string).split(/\s+/).filter(Boolean);
-      const chars: string[] = tokens.slice(0, 3).map((t) => t.charAt(0));
-      if (chars.length === 3) {
-        letters = [chars[0], chars[1], chars[2]];
+      const normalized = normalizeRoot(entry["الجذر"] as string);
+      if (normalized.length === 3) {
+        primaryRoot = normalized;
+        letters = [normalized[0], normalized[1], normalized[2]];
       }
     }
 
@@ -146,12 +156,6 @@ export function generateRoundData(difficulty: Difficulty, usedRoots?: Set<string
     const allPermutations = generateAllPermutations(
       letters as [string, string, string]
     );
-
-    // Determine primary valid root string (join tokens without spaces)
-    const primaryRoot =
-      entry && entry["الجذر"]
-        ? (entry["الجذر"] as string).replace(/\s+/g, "")
-        : null;
 
     // Always include any valid roots for these letters regardless of the
     // difficulty of the chosen entry. This allows roots from other
@@ -170,14 +174,12 @@ export function generateRoundData(difficulty: Difficulty, usedRoots?: Set<string
     const invalidPermutations = allPermutations.filter(
       (p) => !selectedPermutations.includes(p)
     );
-    const shuffledInvalid = [...invalidPermutations].sort(
-      () => Math.random() - 0.5
-    );
+    const shuffledInvalid = shuffle(invalidPermutations);
     const slotsRemaining = Math.max(0, 6 - selectedPermutations.length);
-    selectedPermutations = [
+    selectedPermutations = shuffle([
       ...selectedPermutations,
       ...shuffledInvalid.slice(0, slotsRemaining),
-    ].sort(() => Math.random() - 0.5);
+    ]);
 
     const meanings: { [key: string]: string } = {};
     const successMessages: { [key: string]: string } = {};
@@ -205,7 +207,7 @@ export function generateRoundData(difficulty: Difficulty, usedRoots?: Set<string
         const allEntriesAny: any[] = (qutufData as any)?.Feuil1 || [];
         const match = allEntriesAny.find((e) => {
           const g =
-            e && e["الجذر"] ? (e["الجذر"] as string).replace(/\s+/g, "") : null;
+            e && e["الجذر"] ? normalizeRoot(e["الجذر"] as string) : null;
           return g === root;
         });
         if (match) {
@@ -245,6 +247,7 @@ export function generateRoundData(difficulty: Difficulty, usedRoots?: Set<string
       successMessages,
       poetryExamples,
       difficulty: entryDifficulty,
+      usedKey: primaryRoot || (letters as string[]).join(""),
     };
   } catch (e) {
     // On error, fallback to previous behavior
@@ -257,14 +260,12 @@ export function generateRoundData(difficulty: Difficulty, usedRoots?: Set<string
     const invalidPermutations = allPermutations.filter(
       (p) => !validRootsList.includes(p)
     );
-    const shuffledInvalid = [...invalidPermutations].sort(
-      () => Math.random() - 0.5
-    );
-    const slotsRemaining = 6 - selectedPermutations.length;
-    selectedPermutations = [
+    const shuffledInvalid = shuffle(invalidPermutations);
+    const slotsRemaining = Math.max(0, 6 - selectedPermutations.length);
+    selectedPermutations = shuffle([
       ...selectedPermutations,
       ...shuffledInvalid.slice(0, slotsRemaining),
-    ];
+    ]);
 
     const meanings: { [key: string]: string } = {};
     const successMessages: { [key: string]: string } = {};
@@ -288,6 +289,7 @@ export function generateRoundData(difficulty: Difficulty, usedRoots?: Set<string
       meanings,
       successMessages,
       poetryExamples,
+      usedKey: letters.join(""),
     };
   }
 }

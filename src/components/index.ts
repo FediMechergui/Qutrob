@@ -3,5 +3,5 @@ export { RootGrid } from './RootGrid';
 export { ClamAnimation } from './ClamAnimation';
 export { HintModal } from './HintModal';
 export { ScoreBoard } from './ScoreBoard';
-export { SuccessMessageModal } from "./SuccessMessageModal";
 export { RootDefinitionModal } from "./RootDefinitionModal";
+export { ClamCard } from "./ClamCard";

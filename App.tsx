@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import * as Updates from "expo-updates";
 import { HomeScreen, GameScreen, QutrabScreen } from "./src/screens";
 import { WelcomeScreen } from "./src/screens/WelcomeScreen";
 import { VideoRewardScreen } from "./src/screens/VideoRewardScreen";
@@ -23,7 +24,6 @@ type RewardContext = "roots" | "qutrab" | null;
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>("home");
-  const [startingLevel, setStartingLevel] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [dbInitialized, setDbInitialized] = useState(false);
   const [player, setPlayer] = useState<Player | null>(null);
@@ -35,7 +35,24 @@ export default function App() {
   // Initialize database on app start
   useEffect(() => {
     initializeApp();
+    checkForOtaUpdate();
   }, []);
+
+  // OTA updates: fetch and apply new JS bundles published via `eas update`
+  // without requiring a store release. No-op in development and on web.
+  const checkForOtaUpdate = async () => {
+    if (__DEV__ || !Updates.isEnabled) return;
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        await Updates.fetchUpdateAsync();
+        await Updates.reloadAsync();
+      }
+    } catch (e) {
+      // Never block or crash the app because an update check failed
+      console.warn("OTA update check failed:", e);
+    }
+  };
 
   const initializeApp = async () => {
     try {
@@ -77,14 +94,7 @@ export default function App() {
   };
 
   const handleStartGame = (resume: boolean = false) => {
-    setStartingLevel(0);
     setResumeRoots(resume);
-    setCurrentScreen("game");
-  };
-
-  const handleSelectLevel = (levelIndex: number) => {
-    setStartingLevel(levelIndex);
-    setResumeRoots(false);
     setCurrentScreen("game");
   };
 
@@ -201,7 +211,6 @@ export default function App() {
   return (
     <HomeScreen
       onStartGame={handleStartGame}
-      onSelectLevel={handleSelectLevel}
       onStartQutrab={handleStartQutrab}
       onOpenVideoArchive={handleOpenVideoArchive}
       playerName={player?.name || null}

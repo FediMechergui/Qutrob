@@ -3,9 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-nati
 import { COLORS, FONTS, SHADOWS, BORDER_RADIUS, SPACING } from '../constants/theme';
 import {
   scaleFontSize,
-  hp,
   isShortScreen,
-  isMediumHeight,
+  useResponsive,
 } from "../utils/responsive";
 
 interface RootOption {
@@ -22,26 +21,14 @@ interface RootGridProps {
   disabled?: boolean;
 }
 
-const { width, height } = Dimensions.get("window");
-const isSmallDevice = width < 360;
-const isMediumDevice = width >= 360 && width < 414;
-const isShortDevice = height < 700;
+// Static styling details still use launch-time width; the grid item geometry
+// is computed live inside the component.
+const isSmallDevice = Dimensions.get("window").width < 360;
+const isShortDevice = Dimensions.get("window").height < 700;
 
-// Height-aware grid calculations - 5 items layout (3 top row, 2 bottom row centered)
 const GRID_PADDING = isSmallDevice ? SPACING.xs : SPACING.sm;
 const ITEM_MARGIN = isShortScreen ? 4 : isSmallDevice ? SPACING.xs : SPACING.sm;
 const ITEMS_PER_ROW = 3; // Maximum items per row
-
-// Calculate item width based on both width and height
-const getItemWidth = () => {
-  const widthBased =
-    (width - GRID_PADDING * 2 - ITEM_MARGIN * (ITEMS_PER_ROW + 1)) /
-    ITEMS_PER_ROW;
-  const maxByHeight = isShortScreen ? hp(9) : isMediumHeight ? hp(10) : 85;
-  return Math.min(widthBased, maxByHeight);
-};
-
-const ITEM_WIDTH = getItemWidth();
 
 export const RootGrid: React.FC<RootGridProps> = ({
   options,
@@ -49,6 +36,22 @@ export const RootGrid: React.FC<RootGridProps> = ({
   onRootPress,
   disabled = false,
 }) => {
+  const responsive = useResponsive();
+
+  // Item width follows the live window size (rotation, resize, foldables)
+  const widthBased =
+    (responsive.width - GRID_PADDING * 2 - ITEM_MARGIN * (ITEMS_PER_ROW + 1)) /
+    ITEMS_PER_ROW;
+  const maxByHeight = responsive.isShort
+    ? responsive.hp(9)
+    : responsive.isMediumHeight
+    ? responsive.hp(10)
+    : 85;
+  const itemWidth = Math.min(widthBased, maxByHeight);
+  const itemSizeStyle = {
+    width: itemWidth,
+    height: itemWidth * (responsive.isShort ? 0.8 : 0.85),
+  };
   const getItemStyle = (option: RootOption) => {
     if (option.isRevealed) {
       if (option.isValid) {
@@ -97,7 +100,7 @@ export const RootGrid: React.FC<RootGridProps> = ({
         {firstRow.map((option, index) => (
           <TouchableOpacity
             key={`${option.root}-${index}`}
-            style={[styles.item, getItemStyle(option)]}
+            style={[styles.item, itemSizeStyle, getItemStyle(option)]}
             onPress={() => handlePress(option)}
             disabled={disabled && !option.isRevealed}
             activeOpacity={0.7}
@@ -122,7 +125,7 @@ export const RootGrid: React.FC<RootGridProps> = ({
         {secondRow.map((option, index) => (
           <TouchableOpacity
             key={`${option.root}-${index + 3}`}
-            style={[styles.item, getItemStyle(option)]}
+            style={[styles.item, itemSizeStyle, getItemStyle(option)]}
             onPress={() => handlePress(option)}
             disabled={disabled && !option.isRevealed}
             activeOpacity={0.7}
@@ -171,12 +174,7 @@ const styles = StyleSheet.create({
     gap: ITEM_MARGIN,
     marginBottom: ITEM_MARGIN,
   },
-  centerRow: {
-    paddingHorizontal: ITEM_WIDTH / 2 + ITEM_MARGIN,
-  },
   item: {
-    width: ITEM_WIDTH,
-    height: ITEM_WIDTH * (isShortScreen ? 0.8 : 0.85),
     borderRadius: BORDER_RADIUS.sm,
     alignItems: "center",
     justifyContent: "center",
