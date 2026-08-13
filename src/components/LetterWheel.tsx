@@ -1,13 +1,11 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, Easing } from 'react-native';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Dimensions } from 'react-native';
 import { COLORS, FONTS, SHADOWS, BORDER_RADIUS, SPACING } from '../constants/theme';
-import {
-  scaleFontSize,
-  moderateScale,
-  hp,
-  isShortScreen,
-  isMediumHeight,
-} from "../utils/responsive";
+import { scaleFontSize, useResponsive } from "../utils/responsive";
+
+// Static styling details (fonts, borders) still use launch-time width;
+// the wheel geometry itself is computed live inside the component.
+const isSmallDevice = Dimensions.get("window").width < 360;
 
 interface LetterWheelProps {
   letters: [string, string, string];
@@ -16,37 +14,26 @@ interface LetterWheelProps {
   isSpinning?: boolean;
 }
 
-const { width, height } = Dimensions.get("window");
-const isSmallDevice = width < 360;
-const isMediumDevice = width >= 360 && width < 414;
+// Height-aware wheel size - smaller on short screens.
+// Computed at render time from the live window size so the wheel adapts to
+// rotation, foldables, and browser resizing.
+function getWheelGeometry(r: ReturnType<typeof useResponsive>) {
+  let wheelSize = r.isSmall
+    ? Math.min(r.width * 0.7, 220)
+    : r.isMedium
+    ? Math.min(r.width * 0.68, 240)
+    : Math.min(r.width * 0.65, 260);
 
-// Height-aware wheel size - smaller on short screens
-const getWheelSize = () => {
-  // Base size on width
-  let baseSize = isSmallDevice
-    ? Math.min(width * 0.7, 220)
-    : isMediumDevice
-    ? Math.min(width * 0.68, 240)
-    : Math.min(width * 0.65, 260);
-
-  // Reduce for short screens
-  if (isShortScreen) {
-    baseSize = Math.min(baseSize, hp(28)); // Max 28% of screen height
-  } else if (isMediumHeight) {
-    baseSize = Math.min(baseSize, hp(30)); // Max 30% of screen height
+  if (r.isShort) {
+    wheelSize = Math.min(wheelSize, r.hp(28)); // Max 28% of screen height
+  } else if (r.isMediumHeight) {
+    wheelSize = Math.min(wheelSize, r.hp(30)); // Max 30% of screen height
   }
 
-  return baseSize;
-};
+  const letterBoxSize = r.isShort ? 38 : r.isSmall ? 42 : r.isMedium ? 46 : 50;
 
-const WHEEL_SIZE = getWheelSize();
-const LETTER_BOX_SIZE = isShortScreen
-  ? 38
-  : isSmallDevice
-  ? 42
-  : isMediumDevice
-  ? 46
-  : 50;
+  return { wheelSize, letterBoxSize };
+}
 
 export const LetterWheel: React.FC<LetterWheelProps> = ({
   letters,
@@ -54,6 +41,43 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
   disabled = false,
   isSpinning = false,
 }) => {
+  const responsive = useResponsive();
+  const { wheelSize, letterBoxSize } = getWheelGeometry(responsive);
+
+  const sizeStyles = useMemo(
+    () => ({
+      container: {
+        width: wheelSize,
+        height: wheelSize,
+      },
+      outerRing: {
+        width: wheelSize,
+        height: wheelSize,
+        borderRadius: wheelSize / 2,
+      },
+      innerRing: {
+        width: wheelSize - 20,
+        height: wheelSize - 20,
+        borderRadius: (wheelSize - 20) / 2,
+      },
+      wheelContent: {
+        width: wheelSize - 40,
+        height: wheelSize - 40,
+        borderRadius: (wheelSize - 40) / 2,
+      },
+      glowEffect: {
+        width: wheelSize + 20,
+        height: wheelSize + 20,
+        borderRadius: (wheelSize + 20) / 2,
+      },
+      letterBox: {
+        width: letterBoxSize,
+        height: letterBoxSize,
+      },
+    }),
+    [wheelSize, letterBoxSize]
+  );
+
   const spinAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
@@ -127,7 +151,7 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
 
   return (
     <TouchableOpacity
-      style={styles.container}
+      style={[styles.container, sizeStyles.container]}
       onPress={handlePress}
       disabled={disabled || isSpinning}
       activeOpacity={0.8}
@@ -135,6 +159,7 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
       <Animated.View
         style={[
           styles.outerRing,
+          sizeStyles.outerRing,
           {
             transform: [
               { scale: scaleAnim },
@@ -144,10 +169,12 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
         ]}
       >
         {/* Glow effect */}
-        <Animated.View style={[styles.glowEffect, { opacity: glowAnim }]} />
+        <Animated.View
+          style={[styles.glowEffect, sizeStyles.glowEffect, { opacity: glowAnim }]}
+        />
 
-        <View style={styles.innerRing}>
-          <View style={styles.wheelContent}>
+        <View style={[styles.innerRing, sizeStyles.innerRing]}>
+          <View style={[styles.wheelContent, sizeStyles.wheelContent]}>
             {/* Decorative pattern */}
             <View style={styles.decorativeTop}>
               <View style={styles.decorDot} />
@@ -162,6 +189,7 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
                   key={`${letter}-${index}`}
                   style={[
                     styles.letterBox,
+                    sizeStyles.letterBox,
                     isSpinning && styles.letterBoxSpinning,
                   ]}
                 >
@@ -203,15 +231,10 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    width: WHEEL_SIZE,
-    height: WHEEL_SIZE,
     alignItems: "center",
     justifyContent: "center",
   },
   outerRing: {
-    width: WHEEL_SIZE,
-    height: WHEEL_SIZE,
-    borderRadius: WHEEL_SIZE / 2,
     backgroundColor: COLORS.inkGold,
     alignItems: "center",
     justifyContent: "center",
@@ -220,9 +243,6 @@ const styles = StyleSheet.create({
     ...SHADOWS.large,
   },
   innerRing: {
-    width: WHEEL_SIZE - 20,
-    height: WHEEL_SIZE - 20,
-    borderRadius: (WHEEL_SIZE - 20) / 2,
     backgroundColor: COLORS.parchment,
     alignItems: "center",
     justifyContent: "center",
@@ -230,9 +250,6 @@ const styles = StyleSheet.create({
     borderColor: COLORS.copperAccent,
   },
   wheelContent: {
-    width: WHEEL_SIZE - 40,
-    height: WHEEL_SIZE - 40,
-    borderRadius: (WHEEL_SIZE - 40) / 2,
     backgroundColor: COLORS.parchmentLight,
     alignItems: "center",
     justifyContent: "center",
@@ -258,8 +275,6 @@ const styles = StyleSheet.create({
     gap: isSmallDevice ? SPACING.xs : SPACING.sm,
   },
   letterBox: {
-    width: LETTER_BOX_SIZE,
-    height: LETTER_BOX_SIZE,
     borderRadius: BORDER_RADIUS.md,
     backgroundColor: COLORS.parchment,
     alignItems: "center",
@@ -281,9 +296,6 @@ const styles = StyleSheet.create({
   },
   glowEffect: {
     position: "absolute",
-    width: WHEEL_SIZE + 20,
-    height: WHEEL_SIZE + 20,
-    borderRadius: (WHEEL_SIZE + 20) / 2,
     backgroundColor: COLORS.inkGold,
     opacity: 0.3,
   },

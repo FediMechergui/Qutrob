@@ -1,36 +1,22 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Dimensions,
   BackHandler,
-  TouchableWithoutFeedback,
+  TouchableOpacity,
 } from "react-native";
-import { Video, ResizeMode, AVPlaybackStatus } from "expo-av";
+import { useVideoPlayer, VideoView } from "expo-video";
+import { useEventListener } from "expo";
 import { COLORS, FONTS } from "../constants/theme";
 import { scaleFontSize } from "../utils/responsive";
 import { unlockVideo, addToTotalScore } from "../services/database";
+import { REWARD_VIDEOS, VIDEO_REWARD_POINTS } from "../data/videos";
+import { pickRandom } from "../utils/random";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-
-// Video files in assets
-const VIDEO_FILES = [
-  {
-    id: "1",
-    filename: "(اتفاق اللفظ و اختلاف المعنى (ضرب_20251211_235337_0000.mp4",
-    title: "اتفاق اللفظ واختلاف المعنى",
-    source: require("../../assets/(اتفاق اللفظ و اختلاف المعنى (ضرب_20251211_235337_0000.mp4"),
-  },
-  {
-    id: "2",
-    filename: "في محاسن العين _20251212_175057_0000.mp4",
-    title: "في محاسن العين",
-    source: require("../../assets/في محاسن العين _20251212_175057_0000.mp4"),
-  },
-];
 
 interface VideoRewardScreenProps {
   onComplete: (earnedPoints: number) => void;
@@ -43,78 +29,58 @@ export const VideoRewardScreen: React.FC<VideoRewardScreenProps> = ({
   onCancel,
   playerId,
 }) => {
-  const videoRef = useRef<Video>(null);
-  const [status, setStatus] = useState<AVPlaybackStatus | null>(null);
-  const [selectedVideo, setSelectedVideo] = useState<
-    (typeof VIDEO_FILES)[0] | null
-  >(null);
-  const [isCompleted, setIsCompleted] = useState(false);
+  // Pick a random video once on mount
+  const [selectedVideo] = useState(() => pickRandom(REWARD_VIDEOS)!);
   const [progress, setProgress] = useState(0);
   const [showingCompletion, setShowingCompletion] = useState(false);
+  const completedRef = useRef(false);
 
-  // Select random video on mount
-  useEffect(() => {
-    const randomIndex = Math.floor(Math.random() * VIDEO_FILES.length);
-    setSelectedVideo(VIDEO_FILES[randomIndex]);
-  }, []);
+  const player = useVideoPlayer(selectedVideo.source, (p) => {
+    p.timeUpdateEventInterval = 0.25;
+    p.play();
+  });
 
-  // Disable back button during video
+  useEventListener(player, "timeUpdate", () => {
+    const duration = player.duration || 0;
+    if (duration > 0) {
+      setProgress(Math.min(100, (player.currentTime / duration) * 100));
+    }
+  });
+
+  useEventListener(player, "playToEnd", () => {
+    handleVideoComplete();
+  });
+
+  // Hardware back = cancel (previously the user was trapped with no way out)
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
-        if (!isCompleted) {
-          // Prevent going back during video
-          return true;
+        if (!completedRef.current) {
+          onCancel();
         }
-        return false;
+        return true;
       }
     );
-
     return () => backHandler.remove();
-  }, [isCompleted]);
+  }, [onCancel]);
 
-  // Handle playback status update
-  const handlePlaybackStatusUpdate = (playbackStatus: AVPlaybackStatus) => {
-    setStatus(playbackStatus);
-
-    if (playbackStatus.isLoaded) {
-      const duration = playbackStatus.durationMillis || 1;
-      const position = playbackStatus.positionMillis || 0;
-      setProgress((position / duration) * 100);
-
-      // Video completed
-      if (playbackStatus.didJustFinish && !isCompleted) {
-        handleVideoComplete();
-      }
-    }
-  };
-
-  // Handle video completion
   const handleVideoComplete = async () => {
-    setIsCompleted(true);
+    if (completedRef.current) return;
+    completedRef.current = true;
     setShowingCompletion(true);
 
-    if (selectedVideo && playerId) {
-      // Unlock video in archive
-      await unlockVideo(playerId, selectedVideo.filename);
-      // Add bonus points
-      await addToTotalScore(playerId, 100);
+    if (playerId) {
+      // Unlock video in archive and award bonus points
+      await unlockVideo(playerId, selectedVideo.filename, selectedVideo.title);
+      await addToTotalScore(playerId, VIDEO_REWARD_POINTS);
     }
 
-    // Show completion message for 2 seconds then return
+    // Show completion message briefly, then return
     setTimeout(() => {
-      onComplete(100);
+      onComplete(VIDEO_REWARD_POINTS);
     }, 2500);
   };
-
-  if (!selectedVideo) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>جاري التحميل...</Text>
-      </View>
-    );
-  }
 
   if (showingCompletion) {
     return (
@@ -122,7 +88,9 @@ export const VideoRewardScreen: React.FC<VideoRewardScreenProps> = ({
         <StatusBar hidden />
         <Text style={styles.completionEmoji}>🎉</Text>
         <Text style={styles.completionTitle}>مبروك!</Text>
-        <Text style={styles.completionSubtitle}>حصلت على 100 نقطة إضافية</Text>
+        <Text style={styles.completionSubtitle}>
+          حصلت على {VIDEO_REWARD_POINTS} نقطة إضافية
+        </Text>
         <Text style={styles.completionVideo}>
           تم فتح: {selectedVideo.title}
         </Text>
@@ -134,42 +102,43 @@ export const VideoRewardScreen: React.FC<VideoRewardScreenProps> = ({
   }
 
   return (
-    <TouchableWithoutFeedback>
-      <View style={styles.container}>
-        <StatusBar hidden />
+    <View style={styles.container}>
+      <StatusBar hidden />
 
-        {/* Video Player - Full Screen */}
-        <Video
-          ref={videoRef}
-          source={selectedVideo.source}
-          style={styles.video}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay
-          isLooping={false}
-          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-          useNativeControls={false}
-        />
+      {/* Video Player - Full Screen */}
+      <VideoView
+        player={player}
+        style={styles.video}
+        contentFit="cover"
+        nativeControls={false}
+      />
 
-        {/* Overlay with progress */}
-        <View style={styles.overlay}>
-          {/* Title */}
-          <View style={styles.titleContainer}>
-            <Text style={styles.videoTitle}>{selectedVideo.title}</Text>
-            <Text style={styles.bonusText}>🎁 +100 نقطة عند الإكمال</Text>
+      {/* Overlay with progress */}
+      <View style={styles.overlay} pointerEvents="box-none">
+        {/* Title */}
+        <View style={styles.titleContainer}>
+          <Text style={styles.videoTitle}>{selectedVideo.title}</Text>
+          <Text style={styles.bonusText}>
+            🎁 +{VIDEO_REWARD_POINTS} نقطة عند الإكمال
+          </Text>
+        </View>
+
+        {/* Progress bar */}
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${progress}%` }]} />
           </View>
-
-          {/* Progress bar */}
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${progress}%` }]} />
-            </View>
-            <Text style={styles.progressText}>
-              {Math.round(progress)}% - لا يمكن تخطي الفيديو
-            </Text>
-          </View>
+          <Text style={styles.progressText}>
+            {Math.round(progress)}% - أكمل الفيديو للحصول على المكافأة
+          </Text>
         </View>
       </View>
-    </TouchableWithoutFeedback>
+
+      {/* Cancel button - leaving forfeits the reward but never traps the user */}
+      <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+        <Text style={styles.cancelButtonText}>✕</Text>
+      </TouchableOpacity>
+    </View>
   );
 };
 
@@ -177,17 +146,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#000",
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loadingText: {
-    color: "#fff",
-    fontSize: scaleFontSize(18),
-    ...FONTS.arabicText,
   },
   video: {
     width: SCREEN_WIDTH,
@@ -243,6 +201,21 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: scaleFontSize(12),
     ...FONTS.arabicText,
+  },
+  cancelButton: {
+    position: "absolute",
+    top: 40,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelButtonText: {
+    color: "#fff",
+    fontSize: 20,
   },
   completionContainer: {
     flex: 1,

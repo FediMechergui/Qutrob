@@ -19,6 +19,7 @@ const webStorage: {
   qutrabSessions: any[];
   completedLevels: any[];
   unlockedVideos: any[];
+  unlockedCards: any[];
   gameHistory: any[];
 } = {
   players: [],
@@ -27,6 +28,7 @@ const webStorage: {
   qutrabSessions: [],
   completedLevels: [],
   unlockedVideos: [],
+  unlockedCards: [],
   gameHistory: [],
 };
 
@@ -148,6 +150,19 @@ export async function initDatabase(): Promise<void> {
         UNIQUE(player_id, filename)
       );
       
+      -- Unlocked knowledge cards
+      CREATE TABLE IF NOT EXISTS unlocked_cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        card_id TEXT NOT NULL,
+        title TEXT,
+        description TEXT,
+        notes TEXT,
+        unlocked_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (player_id) REFERENCES players(id),
+        UNIQUE(player_id, card_id)
+      );
+
       -- Game history for statistics
       CREATE TABLE IF NOT EXISTS game_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -752,6 +767,91 @@ export async function incrementVideoWatchCount(playerId: number, filename: strin
   );
 }
 
+// ============ UNLOCKED CARDS ============
+
+export interface UnlockedCard {
+  id: number | string;
+  card_id: string;
+  title: string | null;
+  description: string | null;
+  notes: string[];
+  unlocked_at: string;
+}
+
+export async function unlockCard(
+  playerId: number,
+  card: { id: string; title?: string; description?: string; notes?: string[] }
+): Promise<void> {
+  if (Platform.OS === 'web') {
+    const exists = webStorage.unlockedCards.find(
+      c => c.player_id === playerId && c.card_id === card.id
+    );
+    if (!exists) {
+      webStorage.unlockedCards.push({
+        id: webStorage.unlockedCards.length + 1,
+        player_id: playerId,
+        card_id: card.id,
+        title: card.title || null,
+        description: card.description || null,
+        notes: card.notes || [],
+        unlocked_at: new Date().toISOString(),
+      });
+      saveWebStorage();
+    }
+    return;
+  }
+
+  const database = getDatabase();
+  await database.runAsync(
+    'INSERT OR IGNORE INTO unlocked_cards (player_id, card_id, title, description, notes) VALUES (?, ?, ?, ?, ?)',
+    [
+      playerId,
+      card.id,
+      card.title || null,
+      card.description || null,
+      JSON.stringify(card.notes || []),
+    ]
+  );
+}
+
+export async function getUnlockedCards(playerId: number): Promise<UnlockedCard[]> {
+  if (Platform.OS === 'web') {
+    return webStorage.unlockedCards
+      .filter(c => c.player_id === playerId)
+      .map(c => ({
+        id: c.id,
+        card_id: c.card_id,
+        title: c.title,
+        description: c.description,
+        notes: Array.isArray(c.notes) ? c.notes : [],
+        unlocked_at: c.unlocked_at,
+      }));
+  }
+
+  const database = getDatabase();
+  const rows = await database.getAllAsync<{
+    id: number;
+    card_id: string;
+    title: string | null;
+    description: string | null;
+    notes: string | null;
+    unlocked_at: string;
+  }>(
+    'SELECT id, card_id, title, description, notes, unlocked_at FROM unlocked_cards WHERE player_id = ? ORDER BY unlocked_at DESC',
+    [playerId]
+  );
+  return rows.map(row => {
+    let notes: string[] = [];
+    try {
+      const parsed = row.notes ? JSON.parse(row.notes) : [];
+      if (Array.isArray(parsed)) notes = parsed;
+    } catch {
+      notes = [];
+    }
+    return { ...row, notes };
+  });
+}
+
 // ============ GAME HISTORY ============
 
 export async function saveGameHistory(
@@ -831,6 +931,7 @@ export async function resetAllData(): Promise<void> {
     webStorage.qutrabSessions = [];
     webStorage.completedLevels = [];
     webStorage.unlockedVideos = [];
+    webStorage.unlockedCards = [];
     webStorage.gameHistory = [];
     saveWebStorage();
     return;
@@ -839,6 +940,7 @@ export async function resetAllData(): Promise<void> {
   const database = getDatabase();
   await database.execAsync(`
     DELETE FROM game_history;
+    DELETE FROM unlocked_cards;
     DELETE FROM unlocked_videos;
     DELETE FROM completed_levels;
     DELETE FROM qutrab_sessions;

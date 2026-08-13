@@ -21,22 +21,15 @@ import {
   SPACING,
 } from "../constants/theme";
 import {
-  QutrabTriangle,
   QutrabRoundData,
   generateQutrabRound,
-  QUTRAB_TRIANGLES,
 } from "../data/qutrabData";
 import { ClamAnimation } from "../components";
 import { ARABIC_PROVERBS } from "../services/arabicApi";
 import {
   scaleFontSize,
-  wp,
-  hp,
-  moderateScale,
   isShortScreen,
-  isMediumHeight,
 } from "../utils/responsive";
-import { saveHighScore, getHighScore } from "../utils/storage";
 import {
   saveQutrabSession,
   getQutrabSession,
@@ -44,9 +37,14 @@ import {
   addToTotalScore,
   updateTotalStreak,
   updateHighScore,
+  getGlobalScores,
   saveCompletedLevel,
   saveGameHistory,
 } from "../services/database";
+import {
+  QUTRAB_DIFFICULTY_CONFIG,
+  calculateQutrabRoundScore,
+} from "../utils/scoring";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const isSmallDevice = SCREEN_WIDTH < 360;
@@ -71,23 +69,7 @@ interface Match {
   meaningKey: "fatha" | "damma" | "kasra";
 }
 
-const DIFFICULTY_CONFIG = {
-  easy: {
-    nameAr: "سهل",
-    roundsPerLevel: 5,
-    basePoints: 10,
-  },
-  medium: {
-    nameAr: "متوسط",
-    roundsPerLevel: 7,
-    basePoints: 15,
-  },
-  hard: {
-    nameAr: "صعب",
-    roundsPerLevel: 10,
-    basePoints: 25,
-  },
-};
+const DIFFICULTY_CONFIG = QUTRAB_DIFFICULTY_CONFIG;
 
 export const QutrabScreen: React.FC<{
   onBack?: () => void;
@@ -133,8 +115,10 @@ export const QutrabScreen: React.FC<{
 
   const loadSavedData = async () => {
     try {
-      const savedHighScore = await getHighScore();
-      setHighScore(savedHighScore);
+      if (playerId) {
+        const globalScores = await getGlobalScores(playerId);
+        setHighScore(globalScores.qutrab_high_score);
+      }
 
       // Check if we should resume a game
       if (resumeGame && playerId) {
@@ -237,14 +221,11 @@ export const QutrabScreen: React.FC<{
 
   // Calculate score
   const calculateRoundScore = useCallback(() => {
-    const correctMatches = matches.filter(isMatchCorrect).length;
-    const basePoints = difficultyConfig.basePoints;
-    const pointsEarned = correctMatches * basePoints;
-    const streakBonus = streak > 0 ? Math.floor(streak * basePoints * 0.1) : 0;
-    return {
-      pointsEarned: pointsEarned + streakBonus,
-      correct: correctMatches,
-    };
+    return calculateQutrabRoundScore({
+      correctMatches: matches.filter(isMatchCorrect).length,
+      basePoints: difficultyConfig.basePoints,
+      streak,
+    });
   }, [matches, streak, difficultyConfig]);
 
   // Check answers - show أحسنت popup immediately after checking
@@ -260,23 +241,23 @@ export const QutrabScreen: React.FC<{
     const newScore = score + result.pointsEarned;
     setScore(newScore);
 
-    if (result.correct === 3) {
-      setStreak((prev) => prev + 1);
-    } else {
-      setStreak(0);
-    }
+    const newStreak = result.isPerfect ? streak + 1 : 0;
+    setStreak(newStreak);
 
-    if (newScore > highScore) {
-      setHighScore(newScore);
-      saveHighScore(newScore);
-      if (playerId) {
+    if (playerId) {
+      // Bank the points earned this round exactly once
+      if (result.pointsEarned > 0) {
+        await addToTotalScore(playerId, result.pointsEarned);
+      }
+
+      if (newScore > highScore) {
+        setHighScore(newScore);
         await updateHighScore(playerId, "qutrab", newScore);
       }
-    }
 
-    // Update streak in database
-    if (playerId && result.correct === 3) {
-      await updateTotalStreak(playerId, streak + 1);
+      await updateTotalStreak(playerId, newStreak);
+    } else if (newScore > highScore) {
+      setHighScore(newScore);
     }
 
     // Show أحسنت popup IMMEDIATELY after checking answers
@@ -307,10 +288,10 @@ export const QutrabScreen: React.FC<{
     const nextRoundInLevel = roundInLevel + 1;
 
     if (nextRoundInLevel >= difficultyConfig.roundsPerLevel) {
-      // Save completed level to database
+      // Save completed level to database.
+      // (Round points were already banked in handleCheckAnswers.)
       if (playerId) {
         await saveCompletedLevel(playerId, "qutrab", level.toString());
-        await addToTotalScore(playerId, score);
         await saveGameHistory(playerId, "qutrab", score, streak, level);
       }
       setShowLevelComplete(true);
@@ -325,6 +306,7 @@ export const QutrabScreen: React.FC<{
     playerId,
     level,
     score,
+    streak,
   ]);
 
   // Next level - ignores difficulty progression, excludes used triangles
@@ -414,7 +396,8 @@ export const QutrabScreen: React.FC<{
       {
         text: "حفظ والخروج",
         onPress: async () => {
-          // Save current progress to SQLite
+          // Save current progress to SQLite.
+          // (Earned points and streak are already banked per round.)
           if (playerId) {
             await saveQutrabSession(playerId, {
               difficulty,
@@ -424,8 +407,6 @@ export const QutrabScreen: React.FC<{
               streak,
               isPaused: true,
             });
-            await addToTotalScore(playerId, score);
-            await updateTotalStreak(playerId, streak);
           }
           setShowPauseModal(false);
           if (onBack) onBack();

@@ -1,4 +1,9 @@
-import { Dimensions, PixelRatio, Platform } from "react-native";
+import {
+  Dimensions,
+  PixelRatio,
+  Platform,
+  useWindowDimensions,
+} from "react-native";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -115,6 +120,59 @@ export const RESPONSIVE_SPACING = {
   xl: scaleWidth(isShortScreen ? 16 : 32),
   xxl: scaleWidth(isShortScreen ? 24 : 48),
 };
+
+// ============ LIVE RESPONSIVE HOOK ============
+// Unlike the module-level constants above (frozen at app launch), this hook
+// re-computes on every window size change, so layouts adapt to rotation,
+// foldables, split-screen, and browser resizing on web.
+
+export interface ResponsiveInfo {
+  width: number;
+  height: number;
+  isSmall: boolean;
+  isMedium: boolean;
+  isLarge: boolean;
+  isShort: boolean;
+  isMediumHeight: boolean;
+  isTall: boolean;
+  wp: (percentage: number) => number;
+  hp: (percentage: number) => number;
+  scaleFont: (size: number) => number;
+}
+
+export function useResponsive(): ResponsiveInfo {
+  const { width, height } = useWindowDimensions();
+
+  const isSmall = width < 360;
+  const isMedium = width >= 360 && width < 414;
+  const isShort = height < 700;
+  const isMediumH = height >= 700 && height < 800;
+
+  const scaleFont = (size: number): number => {
+    const heightFactor = isShort ? 0.85 : isMediumH ? 0.92 : 1;
+    const scale = width / BASE_WIDTH;
+    const moderate = size + (scale - 1) * size * 0.4;
+    const scaledSize =
+      Math.round(PixelRatio.roundToNearestPixel(moderate)) * heightFactor;
+    const minSize = Math.max(size * 0.7, 9);
+    const maxSize = size * 1.2;
+    return Math.min(Math.max(scaledSize, minSize), maxSize);
+  };
+
+  return {
+    width,
+    height,
+    isSmall,
+    isMedium,
+    isLarge: width >= 414,
+    isShort,
+    isMediumHeight: isMediumH,
+    isTall: height >= 800,
+    wp: (percentage: number) => Math.round((percentage * width) / 100),
+    hp: (percentage: number) => Math.round((percentage * height) / 100),
+    scaleFont,
+  };
+}
 
 // Responsive font sizes
 export const RESPONSIVE_FONTS = {

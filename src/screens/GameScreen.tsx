@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -35,11 +35,9 @@ import {
   ARABIC_PROVERBS,
   Difficulty,
 } from "../services/arabicApi";
-import { getRootInfo } from "../data/arabicDatabase";
+import { normalizeRoot } from "../data/arabicDatabase";
 import qutufData from "../../القطوف.json";
 import ahsantJson from "../../أحسنت.json";
-import winJson from "../../win.json";
-import { getUnlockedCards, unlockCard } from "../utils/gameStorage";
 import {
   saveRootsSession,
   getRootsSession,
@@ -50,8 +48,17 @@ import {
   getGlobalScores,
   saveCompletedLevel,
   saveGameHistory,
+  getUnlockedCards,
+  unlockCard,
+  UnlockedCard,
 } from "../services/database";
-import { scaleFontSize, wp, hp } from "../utils/responsive";
+import {
+  ROOTS_DIFFICULTY_CONFIG,
+  difficultyForLevel,
+  calculateRootsRoundScore,
+} from "../utils/scoring";
+import { pickRandom } from "../utils/random";
+import { scaleFontSize } from "../utils/responsive";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -73,27 +80,8 @@ interface RootOption {
   isRevealed: boolean;
 }
 
-// Difficulty settings
-const DIFFICULTY_CONFIG = {
-  easy: {
-    nameAr: "سهل",
-    roundsPerLevel: 3,
-    basePoints: 10,
-    hintCost: 5,
-  },
-  medium: {
-    nameAr: "متوسط",
-    roundsPerLevel: 4,
-    basePoints: 15,
-    hintCost: 10,
-  },
-  hard: {
-    nameAr: "صعب",
-    roundsPerLevel: 5,
-    basePoints: 25,
-    hintCost: 15,
-  },
-};
+// Difficulty settings (shared with scoring tests)
+const DIFFICULTY_CONFIG = ROOTS_DIFFICULTY_CONFIG;
 
 // Proverbs for each level completion
 const LEVEL_PROVERBS = ARABIC_PROVERBS;
@@ -140,10 +128,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({
 
   // Popups and unlocks
   const [ahsant, setAhsant] = useState<any[]>([]);
-  const [wins, setWins] = useState<any[]>([]);
   const [showClamPopup, setShowClamPopup] = useState(false);
   const [popupItem, setPopupItem] = useState<any | null>(null);
-  const [unlockedCardsState, setUnlockedCardsState] = useState<any[]>([]);
+  const [unlockedCardsState, setUnlockedCardsState] = useState<UnlockedCard[]>([]);
   const [showUnlockedModal, setShowUnlockedModal] = useState(false);
   const [showClamCard, setShowClamCard] = useState(false);
   const [clamCardTitle, setClamCardTitle] = useState("");
@@ -209,6 +196,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
 
   const loadSavedData = async () => {
     try {
+      let restored = false;
+
       if (playerId) {
         const globalScores = await getGlobalScores(playerId);
         setHighScore(globalScores.roots_high_score);
@@ -218,17 +207,18 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           const savedSession = await getRootsSession(playerId);
           if (savedSession && savedSession.is_paused) {
             // Restore game state
-            setDifficulty(savedSession.difficulty as Difficulty);
-            setLevel(savedSession.current_level);
+            const savedLevel = savedSession.current_level;
+            setDifficulty(difficultyForLevel(savedLevel));
+            setLevel(savedLevel);
             setRoundInLevel(savedSession.current_round);
             setScore(savedSession.score);
             setStreak(savedSession.streak);
             setShowDifficultySelect(false);
 
-            // Generate a new round (can't save exact round state) with fresh usedRoots
+            // Generate a new round (exact round state is not persisted)
             const newUsedRoots = new Set<string>();
             const newRoundData = generateRoundData(
-              savedSession.difficulty as Difficulty,
+              difficultyForLevel(savedLevel),
               newUsedRoots
             );
             setRoundData(newRoundData);
@@ -237,32 +227,39 @@ export const GameScreen: React.FC<GameScreenProps> = ({
               string,
               string
             ]);
-            // Track this root as used
-            const rootStr = newRoundData.letters.join("").replace(/\s+/g, "");
-            newUsedRoots.add(rootStr);
+            newUsedRoots.add(newRoundData.usedKey);
             setUsedRoots(newUsedRoots);
+            restored = true;
           }
         }
       }
 
+      // Fresh game: generate the first round immediately so the grid is never empty
+      if (!restored) {
+        const newUsedRoots = new Set<string>();
+        const newRoundData = generateRoundData("easy", newUsedRoots);
+        setRoundData(newRoundData);
+        setCurrentLetters([...newRoundData.letters] as [
+          string,
+          string,
+          string
+        ]);
+        newUsedRoots.add(newRoundData.usedKey);
+        setUsedRoots(newUsedRoots);
+      }
+
       setIsLoading(false);
 
-      // Load popup and win data (from project root JSON files)
+      // Load popup data (from project root JSON file)
       try {
         setAhsant(Array.isArray(ahsantJson as any) ? (ahsantJson as any) : []);
       } catch (e) {
         setAhsant([]);
       }
 
+      // Load unlocked cards from the database
       try {
-        setWins(Array.isArray(winJson as any) ? (winJson as any) : []);
-      } catch (e) {
-        setWins([]);
-      }
-
-      // Load unlocked cards from storage
-      try {
-        const unlocked = await getUnlockedCards();
+        const unlocked = playerId ? await getUnlockedCards(playerId) : [];
         setUnlockedCardsState(unlocked);
       } catch (e) {
         setUnlockedCardsState([]);
@@ -280,20 +277,17 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     }
   };
 
-  // Generate new round when starting or advancing
+  // Generate new round when starting or advancing.
+  // Session difficulty stays stable within a level (it only changes with level
+  // progression) so the number of rounds per level never shifts mid-level.
   const generateNewRound = useCallback(() => {
     const newRoundData = generateRoundData(difficulty, usedRoots);
     setRoundData(newRoundData);
-    if ((newRoundData as any).difficulty) {
-      setDifficulty((newRoundData as any).difficulty as Difficulty);
-    }
     setCurrentLetters([...newRoundData.letters] as [string, string, string]);
     setSelectedRoots(new Set());
     setRevealedRoots(false);
     setHintsUsed(0);
-    // Track this root as used
-    const rootStr = newRoundData.letters.join("").replace(/\s+/g, "");
-    setUsedRoots((prev) => new Set([...prev, rootStr]));
+    setUsedRoots((prev) => new Set([...prev, newRoundData.usedKey]));
   }, [difficulty, usedRoots]);
 
   // Start game with selected difficulty
@@ -310,21 +304,16 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     // Generate first round with selected difficulty
     const newRoundData = generateRoundData(selectedDifficulty, newUsedRoots);
     setRoundData(newRoundData);
-    if ((newRoundData as any).difficulty) {
-      setDifficulty((newRoundData as any).difficulty as Difficulty);
-    }
     setCurrentLetters([...newRoundData.letters] as [string, string, string]);
     setSelectedRoots(new Set());
     setRevealedRoots(false);
     setHintsUsed(0);
-    // Track this root as used
-    const rootStr = newRoundData.letters.join("").replace(/\s+/g, "");
-    newUsedRoots.add(rootStr);
+    newUsedRoots.add(newRoundData.usedKey);
     setUsedRoots(newUsedRoots);
   }, []);
 
   // Handle letter rotation - generates completely NEW random letters
-  const handleRotate = useCallback(async () => {
+  const handleRotate = useCallback(() => {
     if (isSpinning || revealedRoots) return;
 
     setIsSpinning(true);
@@ -336,9 +325,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
       setRoundData(newRoundData);
       setCurrentLetters([...newRoundData.letters] as [string, string, string]);
       setSelectedRoots(new Set());
-      // Track this root as used
-      const rootStr = newRoundData.letters.join("").replace(/\s+/g, "");
-      setUsedRoots((prev) => new Set([...prev, rootStr]));
+      setUsedRoots((prev) => new Set([...prev, newRoundData.usedKey]));
       setIsSpinning(false);
     }, 800);
   }, [difficulty, usedRoots, isSpinning, revealedRoots]);
@@ -379,34 +366,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         incorrect: 0,
         missed: 0,
         streakBonus: 0,
+        isPerfect: false,
       };
 
-    let correct = 0;
-    let incorrect = 0;
-
-    selectedRoots.forEach((root) => {
-      if (roundData.validRoots.includes(root)) {
-        correct++;
-      } else {
-        incorrect++;
-      }
+    return calculateRootsRoundScore({
+      validRoots: roundData.validRoots,
+      selectedRoots,
+      basePoints: difficultyConfig.basePoints,
+      streak,
     });
-
-    const missed = roundData.validRoots.length - correct;
-    const basePoints = difficultyConfig.basePoints;
-
-    // Points calculation
-    const correctPoints = correct * basePoints;
-    const incorrectPenalty = incorrect * Math.floor(basePoints / 2);
-    const missedPenalty = missed * Math.floor(basePoints / 4);
-    const streakBonus = streak > 0 ? Math.floor(streak * basePoints * 0.1) : 0;
-
-    const pointsEarned = Math.max(
-      0,
-      correctPoints - incorrectPenalty - missedPenalty + streakBonus
-    );
-
-    return { pointsEarned, correct, incorrect, missed, streakBonus };
   }, [roundData, selectedRoots, streak, difficultyConfig]);
 
   // Handle showing definition modal when clicking on valid root after reveal
@@ -416,11 +384,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         setDefinitionRoot(root);
         setDefinitionMeaning(roundData.meanings[root] || "جذر صحيح");
         setDefinitionPoetry(roundData.poetryExamples[root]);
-        setDefinitionDifficulty((roundData as any).difficulty || difficulty);
+        setDefinitionDifficulty(roundData.difficulty || difficulty);
         setShowDefinitionModal(true);
       }
     },
-    [roundData]
+    [roundData, difficulty]
   );
 
   // Handle check answers
@@ -439,7 +407,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
 
     // Update streak
     let newStreak = streak;
-    if (result.incorrect === 0 && result.missed === 0) {
+    if (result.isPerfect) {
       newStreak = streak + 1;
       setStreak(newStreak);
     } else {
@@ -447,14 +415,19 @@ export const GameScreen: React.FC<GameScreenProps> = ({
       setStreak(0);
     }
 
-    // Update high score in database
-    if (playerId && newScore > highScore) {
-      setHighScore(newScore);
-      await updateHighScore(playerId, "roots", newScore);
-    }
-
-    // Update total streak in database
     if (playerId) {
+      // Bank the points earned this round exactly once
+      if (result.pointsEarned > 0) {
+        await addToTotalScore(playerId, result.pointsEarned);
+      }
+
+      // Update high score in database
+      if (newScore > highScore) {
+        setHighScore(newScore);
+        await updateHighScore(playerId, "roots", newScore);
+      }
+
+      // Update total streak in database
       await updateTotalStreak(playerId, newStreak);
     }
 
@@ -472,7 +445,6 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         roundData.meanings?.[validRoot] ||
         "";
 
-      const normalizeRoot = (r: string) => r.replace(/\s+/g, "");
       const qutufList = (qutufData as any)?.Feuil1;
       const qutufEntry = Array.isArray(qutufList)
         ? qutufList.find(
@@ -492,23 +464,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({
               qutufEntry["أمثلة توضيحية"]
                 ? `📌 ${qutufEntry["أمثلة توضيحية"]}`
                 : null,
-            ].filter(Boolean),
-            data: qutufEntry,
+            ].filter(Boolean) as string[],
           }
         : null;
 
       // Pick a random أحسنت entry for explanation/variant
-      let ahsantFact = null;
-      if (ahsant && ahsant.length > 0) {
-        ahsantFact = ahsant[Math.floor(Math.random() * ahsant.length)];
-      }
+      const ahsantFact = pickRandom(ahsant) ?? null;
 
       // Pick a random proverb
-      let proverb = null;
-      if (ARABIC_PROVERBS && ARABIC_PROVERBS.length > 0) {
-        proverb =
-          ARABIC_PROVERBS[Math.floor(Math.random() * ARABIC_PROVERBS.length)];
-      }
+      const proverb = pickRandom(ARABIC_PROVERBS) ?? null;
 
       setPopupItem({
         title: `🎉 أحسنت! الجذر \"${validRoot}\" صحيح ✅`,
@@ -549,10 +513,10 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     const nextRoundInLevel = roundInLevel + 1;
 
     if (nextRoundInLevel >= difficultyConfig.roundsPerLevel) {
-      // Level complete! Save to database
+      // Level complete! Save to database.
+      // (Round points were already banked in handleCheckAnswers.)
       if (playerId) {
         await saveCompletedLevel(playerId, "roots", level.toString());
-        await addToTotalScore(playerId, score);
         await saveGameHistory(playerId, "roots", score, streak, level);
       }
       setShowClamPopup(false);
@@ -572,19 +536,12 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     streak,
   ]);
 
-  // Handle next level
+  // Handle next level - difficulty follows the level progression
   const handleNextLevel = useCallback(async () => {
     setShowLevelComplete(false);
 
-    // Increase difficulty every 3 levels
     const nextLevel = level + 1;
-    let nextDifficulty = difficulty;
-
-    if (nextLevel > 6 && difficulty === "medium") {
-      nextDifficulty = "hard";
-    } else if (nextLevel > 3 && difficulty === "easy") {
-      nextDifficulty = "medium";
-    }
+    const nextDifficulty = difficultyForLevel(nextLevel);
 
     setLevel(nextLevel);
     setDifficulty(nextDifficulty);
@@ -597,11 +554,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     setSelectedRoots(new Set());
     setRevealedRoots(false);
     setHintsUsed(0);
-    // Track this root as used
-    const rootStr = newRoundData.letters.join("").replace(/\s+/g, "");
-    setUsedRoots((prev) => new Set([...prev, rootStr]));
-  }, [level, difficulty, usedRoots]);
-// ...existing code...
+    setUsedRoots((prev) => new Set([...prev, newRoundData.usedKey]));
+  }, [level, usedRoots]);
 
   // Reset game
   const handleResetGame = useCallback(() => {
@@ -644,29 +598,32 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     setShowPauseModal(true);
   }, [playerId, difficulty, level, roundInLevel, score, streak]);
 
-  // Ensure progress is saved if component unmounts or user navigates away
+  // Keep the latest session state in a ref so the unmount cleanup below runs
+  // exactly once (an effect with state deps would re-run its cleanup on every
+  // state change, which previously re-banked the score repeatedly).
+  const sessionRef = useRef({ difficulty, level, roundInLevel, score, streak });
+  useEffect(() => {
+    sessionRef.current = { difficulty, level, roundInLevel, score, streak };
+  }, [difficulty, level, roundInLevel, score, streak]);
+
+  // Save session once when the screen unmounts (navigating away)
   useEffect(() => {
     return () => {
-      (async () => {
-        try {
-          if (playerId) {
-            await saveRootsSession(playerId, {
-              difficulty,
-              currentLevel: level,
-              currentRound: roundInLevel,
-              score,
-              streak,
-              isPaused: true,
-            });
-            await addToTotalScore(playerId, score);
-            await updateTotalStreak(playerId, streak);
-          }
-        } catch (e) {
-          // ignore
-        }
-      })();
+      const s = sessionRef.current;
+      if (playerId) {
+        saveRootsSession(playerId, {
+          difficulty: s.difficulty,
+          currentLevel: s.level,
+          currentRound: s.roundInLevel,
+          score: s.score,
+          streak: s.streak,
+          isPaused: true,
+        }).catch(() => {
+          // ignore - best-effort save on unmount
+        });
+      }
     };
-  }, [playerId, difficulty, level, roundInLevel, score, streak]);
+  }, [playerId]);
 
   // Resume game from pause
   const handleResumePause = useCallback(() => {
@@ -680,8 +637,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   }, []);
 
   // Confirm exit - save and go back
+  // (Earned points and streak are already banked per round; only the session
+  // position needs saving here.)
   const handleConfirmExit = useCallback(async () => {
-    // Always save current progress to SQLite before exiting
     if (playerId) {
       await saveRootsSession(playerId, {
         difficulty,
@@ -691,8 +649,6 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         streak,
         isPaused: true,
       });
-      await addToTotalScore(playerId, score);
-      await updateTotalStreak(playerId, streak);
     }
     setShowExitConfirm(false);
     if (onBack) onBack();
@@ -873,9 +829,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                   style={styles.diverButton}
                   onPress={async () => {
                     try {
-                      await unlockCard(popupItem.unlockableCard);
-                      const unlocked = await getUnlockedCards();
-                      setUnlockedCardsState(unlocked);
+                      if (playerId) {
+                        await unlockCard(playerId, popupItem.unlockableCard);
+                        const unlocked = await getUnlockedCards(playerId);
+                        setUnlockedCardsState(unlocked);
+                      }
                     } finally {
                       setClamCardTitle(
                         popupItem.unlockableCard.title || "بطاقة"
@@ -1167,18 +1125,18 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                   unlockedCardsState.map((card) => (
                     <View key={card.id} style={styles.unlockedCard}>
                       <Text style={styles.unlockedCardTitle}>
-                        {card.title || `بطاقة ${card.id}`}
+                        {card.title || `بطاقة ${card.card_id}`}
                       </Text>
                       {card.description && (
                         <Text style={styles.unlockedCardDesc}>
                           {card.description}
                         </Text>
                       )}
-                      {card.data && card.data["التحليل النهائي"] && (
-                        <Text style={styles.unlockedCardAnalysis}>
-                          {card.data["التحليل النهائي"]}
+                      {card.notes.map((note, idx) => (
+                        <Text key={idx} style={styles.unlockedCardAnalysis}>
+                          {note}
                         </Text>
-                      )}
+                      ))}
                     </View>
                   ))
                 )}

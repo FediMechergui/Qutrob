@@ -2,6 +2,8 @@
 // Words that change meaning based on the first letter's vowel mark (haraka/tashkeel)
 // الفتحة (fatha) = ـَ, الضمة (damma) = ـُ, الكسرة (kasra) = ـِ
 
+import { shuffle } from "../utils/random";
+
 export interface QutrabTriangle {
   id: number;
   base: string; // The base word without tashkeel
@@ -444,15 +446,8 @@ export function getRandomTriangle(
   return triangles[Math.floor(Math.random() * triangles.length)];
 }
 
-// Helper function to shuffle an array
-export function shuffleArray<T>(array: T[]): T[] {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
+// Re-export the shared Fisher-Yates shuffle for backwards compatibility
+export { shuffle as shuffleArray } from "../utils/random";
 
 // Generate game round data - picks from ALL triangles regardless of difficulty
 // usedIds: Set of triangle IDs that have already been used (to avoid repeats)
@@ -480,16 +475,16 @@ export function generateQutrabRound(
   }
   
   // Shuffle for random order and pick first
-  const shuffled = shuffleArray(available);
+  const shuffled = shuffle(available);
   const triangle = shuffled[0];
 
-  const words = shuffleArray([
+  const words = shuffle([
     { key: "fatha" as const, word: triangle.fatha.word },
     { key: "damma" as const, word: triangle.damma.word },
     { key: "kasra" as const, word: triangle.kasra.word },
   ]);
 
-  const meanings = shuffleArray([
+  const meanings = shuffle([
     { key: "fatha" as const, meaning: triangle.fatha.meaning },
     { key: "damma" as const, meaning: triangle.damma.meaning },
     { key: "kasra" as const, meaning: triangle.kasra.meaning },

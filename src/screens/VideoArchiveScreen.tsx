@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,30 +10,18 @@ import {
   Dimensions,
   Modal,
 } from "react-native";
-import { Video, ResizeMode, AVPlaybackStatus } from "expo-av";
+import { useVideoPlayer, VideoView } from "expo-video";
+import { useEventListener } from "expo";
 import { COLORS, FONTS } from "../constants/theme";
 import { scaleFontSize, moderateScale } from "../utils/responsive";
-import { getUnlockedVideos, UnlockedVideo } from "../services/database";
+import {
+  getUnlockedVideos,
+  incrementVideoWatchCount,
+  UnlockedVideo,
+} from "../services/database";
+import { REWARD_VIDEOS, RewardVideo } from "../data/videos";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-
-// All available videos
-const ALL_VIDEOS = [
-  {
-    id: "1",
-    filename: "(اتفاق اللفظ و اختلاف المعنى (ضرب_20251211_235337_0000.mp4",
-    title: "اتفاق اللفظ واختلاف المعنى",
-    description: "فيديو تعليمي عن اتفاق اللفظ واختلاف المعنى في اللغة العربية",
-    source: require("../../assets/(اتفاق اللفظ و اختلاف المعنى (ضرب_20251211_235337_0000.mp4"),
-  },
-  {
-    id: "2",
-    filename: "في محاسن العين _20251212_175057_0000.mp4",
-    title: "في محاسن العين",
-    description: "فيديو تعليمي عن محاسن العين في الشعر العربي",
-    source: require("../../assets/في محاسن العين _20251212_175057_0000.mp4"),
-  },
-];
 
 interface VideoArchiveScreenProps {
   onBack: () => void;
@@ -44,15 +32,28 @@ export const VideoArchiveScreen: React.FC<VideoArchiveScreenProps> = ({
   onBack,
   playerId,
 }) => {
-  const videoRef = useRef<Video>(null);
   const [unlockedVideos, setUnlockedVideos] = useState<UnlockedVideo[]>([]);
-  const [selectedVideo, setSelectedVideo] = useState<
-    (typeof ALL_VIDEOS)[0] | null
-  >(null);
+  const [selectedVideo, setSelectedVideo] = useState<RewardVideo | null>(null);
   const [showVideoModal, setShowVideoModal] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Player is created once and its source swapped per selection
+  const player = useVideoPlayer(null, (p) => {
+    p.timeUpdateEventInterval = 0.25;
+  });
+
+  useEventListener(player, "timeUpdate", () => {
+    const duration = player.duration || 0;
+    if (duration > 0) {
+      setProgress(Math.min(100, (player.currentTime / duration) * 100));
+    }
+  });
+
+  useEventListener(player, "playingChange", ({ isPlaying: playing }) => {
+    setIsPlaying(playing);
+  });
 
   useEffect(() => {
     loadUnlockedVideos();
@@ -74,37 +75,38 @@ export const VideoArchiveScreen: React.FC<VideoArchiveScreenProps> = ({
     return unlockedVideos.find((v) => v.filename === filename);
   };
 
-  const handleVideoSelect = async (video: (typeof ALL_VIDEOS)[0]) => {
-    if (isVideoUnlocked(video.filename)) {
-      setSelectedVideo(video);
-      setShowVideoModal(true);
-      setIsPlaying(true);
-      setProgress(0);
+  const handleVideoSelect = async (video: RewardVideo) => {
+    if (!isVideoUnlocked(video.filename)) return;
+
+    setSelectedVideo(video);
+    setShowVideoModal(true);
+    setProgress(0);
+
+    try {
+      await player.replaceAsync(video.source);
+      player.play();
+    } catch (e) {
+      console.error("Error loading video:", e);
+    }
+
+    if (playerId) {
+      incrementVideoWatchCount(playerId, video.filename)
+        .then(loadUnlockedVideos)
+        .catch(() => {});
     }
   };
 
   const handleCloseVideo = () => {
+    player.pause();
     setShowVideoModal(false);
     setSelectedVideo(null);
-    setIsPlaying(false);
   };
 
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (status.isLoaded) {
-      const duration = status.durationMillis || 1;
-      const position = status.positionMillis || 0;
-      setProgress((position / duration) * 100);
-      setIsPlaying(status.isPlaying);
-    }
-  };
-
-  const togglePlayPause = async () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        await videoRef.current.pauseAsync();
-      } else {
-        await videoRef.current.playAsync();
-      }
+  const togglePlayPause = () => {
+    if (player.playing) {
+      player.pause();
+    } else {
+      player.play();
     }
   };
 
@@ -113,7 +115,7 @@ export const VideoArchiveScreen: React.FC<VideoArchiveScreenProps> = ({
     return date.toLocaleDateString("ar-SA");
   };
 
-  const renderVideoItem = ({ item }: { item: (typeof ALL_VIDEOS)[0] }) => {
+  const renderVideoItem = ({ item }: { item: RewardVideo }) => {
     const unlocked = isVideoUnlocked(item.filename);
     const info = getVideoInfo(item.filename);
 
@@ -162,7 +164,7 @@ export const VideoArchiveScreen: React.FC<VideoArchiveScreenProps> = ({
   };
 
   const unlockedCount = unlockedVideos.length;
-  const totalCount = ALL_VIDEOS.length;
+  const totalCount = REWARD_VIDEOS.length;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -186,7 +188,7 @@ export const VideoArchiveScreen: React.FC<VideoArchiveScreenProps> = ({
           <View
             style={[
               styles.progressFill,
-              { width: `${(unlockedCount / totalCount) * 100}%` },
+              { width: `${(unlockedCount / Math.max(totalCount, 1)) * 100}%` },
             ]}
           />
         </View>
@@ -199,7 +201,7 @@ export const VideoArchiveScreen: React.FC<VideoArchiveScreenProps> = ({
         </View>
       ) : (
         <FlatList
-          data={ALL_VIDEOS}
+          data={REWARD_VIDEOS}
           renderItem={renderVideoItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
@@ -224,19 +226,15 @@ export const VideoArchiveScreen: React.FC<VideoArchiveScreenProps> = ({
 
           {selectedVideo && (
             <>
-              <Video
-                ref={videoRef}
-                source={selectedVideo.source}
+              <VideoView
+                player={player}
                 style={styles.fullScreenVideo}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay
-                isLooping={false}
-                onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                useNativeControls={false}
+                contentFit="cover"
+                nativeControls={false}
               />
 
               {/* Controls Overlay */}
-              <View style={styles.controlsOverlay}>
+              <View style={styles.controlsOverlay} pointerEvents="box-none">
                 {/* Close Button */}
                 <TouchableOpacity
                   style={styles.closeButton}
