@@ -31,23 +31,22 @@ The app includes two game modes:
 ### 🎮 Game Modes
 
 #### لعبة الجذور (Roots Game)
-- Identify valid trilateral Arabic roots from 6 permutation options
-- Learn root meanings with detailed explanations
-- Discover poetry examples (أمثلة شعرية) for each root
-- Mixed difficulty levels with per-level progression (easy → medium → hard)
-- No repeated questions within a session
-- Instant feedback with أحسنت (well done) popups and unlockable root cards
+- Identify valid trilateral Arabic roots from up to 6 permutation options
+- Validity is judged against the **complete Lisān al-ʿArab root inventory** — a real root is never marked wrong
+- Difficulty genuinely shapes the questions: easy levels draw from 🟢 roots, hard levels reach 🔴 and rarer Lisān-only vocabulary
+- Progressive hints (count → first letter → meaning) priced per difficulty; first wheel spin per round is free, later spins cost points
+- Learn root meanings with detailed explanations and poetry examples (أمثلة شعرية)
+- No repeated questions within a session; instant أحسنت popups with real proverbs, «هل تعلم» facts and unlockable root cards
 
 #### مثلث قطرب (Qutrab's Triangle)
-- Match words with meanings based on vowel marks
-- Learn how فتحة، ضمة، كسرة change word meanings
-- Educational content about Arabic morphology
+- Match words with meanings based on the vowel of the first letter
+- **30 vetted triangles**: 23 from Qutrub's original مثلث as versified by Ibn Zurayq (with the verse shown after each round) + 7 textbook classics
+- Difficulty progresses with level (easy → medium → hard)
 
 ### 📚 Rich Content
-- **~3,850 roots** from القطوف.json comprehensive database (plus ~1,800 more across the أ-ذ and ز-ع volumes)
-- **58 educational facts** from أحسنت.json shown in success popups
-- Unlockable knowledge cards for every root you discover
-- Poetry examples and detailed linguistic explanations
+- **6,700+ valid triliteral roots**: the full Lisān al-ʿArab inventory ([lisan345](https://github.com/git85hub/lisan345)) merged with the project's own annotated roots
+- **~3,500 annotated roots** with meaning, hint, examples, difficulty and linguistic analysis; **1,900+** with poetry
+- **58 educational facts** (`أحسنت.json`) shown as «هل تعلم»
 - Reward videos that unlock into a rewatchable archive
 
 ### 🏆 Progress & Rewards
@@ -124,19 +123,29 @@ eas update --channel production --message "Describe the change"
 eas update --channel preview --message "Describe the change"
 ```
 
-Channels are wired in `eas.json` (development / preview / production); the runtime version follows the app version (`runtimeVersion.policy: appVersion`), so native changes require a new build while pure JS changes ship instantly.
+Channels are wired in `eas.json` (development / preview / production). `runtimeVersion` in `app.json` is pinned explicitly and tracks **native** compatibility — bump it only when native modules or the SDK change (then rebuild); JS/data-only releases keep it and ship instantly to every installed build. `version` is the marketing version and can change freely.
 
 ---
 
 ## 🧪 Testing
 
-Game logic (scoring, round generation, data integrity, shuffling) is covered by Jest:
+Game logic (scoring, hints, round generation, data integrity, the data pipeline) is covered by Jest:
 
 ```bash
 npm test          # run the suite
 npm run test:watch
 npm run typecheck # TypeScript check
 ```
+
+## 🗂 Data pipeline
+
+Raw sources live in `data/` (see [data/README.md](data/README.md)); the app bundles only the compact outputs in `src/data/generated/`. After editing any source:
+
+```bash
+npm run build:data
+```
+
+The script normalises roots (spaces, tashkeel, hamza forms, `هـ`), de-duplicates ~2,000 repeated rows, reconciles weak-root spellings with Lisān (بكي ↔ بكو), drops unreconcilable typos, and emits `roots.json`, `rootEntries.json`, `rootAliases.json` and `stats.json`. A test asserts the committed outputs match a fresh build.
 
 ---
 
@@ -187,19 +196,20 @@ Qutrob/
 │   │   ├── arabicApi.ts    # Round generation from the roots databases
 │   │   └── database.ts     # SQLite persistence (players, sessions, scores, cards, videos)
 │   ├── data/
-│   │   ├── arabicDatabase.ts  # Root dictionary built from the JSON volumes
-│   │   ├── qutrabData.ts      # Qutrab triangles
+│   │   ├── generated/         # Output of scripts/build-data.js (what the app bundles)
+│   │   ├── arabicDatabase.ts  # Root universe + annotations + permutation helpers
+│   │   ├── qutrabData.ts      # 30 vetted Qutrub triangles
+│   │   ├── proverbs.ts        # Real proverbs for level completion
 │   │   └── videos.ts          # Reward video registry
 │   ├── utils/
-│   │   ├── scoring.ts      # Pure scoring logic (unit-tested)
+│   │   ├── scoring.ts      # Scoring, hints, spin/hint costs (unit-tested)
 │   │   ├── random.ts       # Fisher-Yates shuffle helpers
 │   │   └── responsive.ts   # Static + live (hook-based) responsive helpers
 │   └── constants/          # Theme
-├── القطوف.json             # Main roots database (~3,850 entries)
-├── أحسنت.json              # Educational facts (58 entries)
-├── win.json                # Knowledge cards data
-├── ابدذر.json              # Roots أ-ذ (~670 entries)
-├── ز الى ع.json            # Roots ز-ع (~1,160 entries)
+├── data/                   # Raw sources (not bundled) — see data/README.md
+│   ├── القطوف.json, ابدذر.json, ز الى ع.json, أحسنت.json, win.json
+│   └── external/lisan345/  # Lisān al-ʿArab root inventory (attribution inside)
+├── scripts/build-data.js   # Data pipeline
 └── package.json
 ```
 
@@ -207,13 +217,13 @@ Qutrob/
 
 ## 📊 Data Sources
 
-| File | Content | Entries |
+| Source | Content | Size |
 |------|---------|---------|
-| `القطوف.json` | Arabic roots with meanings, difficulty, poetry | ~3,850 |
-| `ابدذر.json` | Roots أ-ذ | ~670 |
-| `ز الى ع.json` | Roots ز-ع | ~1,160 |
-| `أحسنت.json` | Educational facts & motivational content | 58 |
-| `win.json` | Knowledge cards (science, physics, tech) | 20 |
+| [lisan345](https://github.com/git85hub/lisan345) (Elmaz 2026) | Every triliteral root in Lisān al-ʿArab — validity ground truth | 6,529 |
+| `القطوف.json` | Annotated roots: meaning, hint, examples, difficulty, poetry, analysis | ~3,300 unique |
+| `ابدذر.json` / `ز الى ع.json` | Older annotated volumes (أ–ذ, ذ–ع) | ~170 extra roots |
+| نظم مثلث قطرب (Ibn Zurayq) | Canonical Qutrub triangles with verses | 23 (+7 classics) |
+| `أحسنت.json` | Educational facts («هل تعلم») | 58 |
 
 ---
 

@@ -44,6 +44,7 @@ import {
 import {
   QUTRAB_DIFFICULTY_CONFIG,
   calculateQutrabRoundScore,
+  difficultyForLevel,
 } from "../utils/scoring";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -101,7 +102,11 @@ export const QutrabScreen: React.FC<{
   
   // أحسنت popup state
   const [showAhsantPopup, setShowAhsantPopup] = useState(false);
-  const [ahsantMessage, setAhsantMessage] = useState<{ title: string; content: string } | null>(null);
+  const [ahsantMessage, setAhsantMessage] = useState<{
+    title: string;
+    content: string;
+    verse?: string;
+  } | null>(null);
 
   // Animation
   const fadeAnim = useState(new Animated.Value(0))[0];
@@ -124,9 +129,11 @@ export const QutrabScreen: React.FC<{
       if (resumeGame && playerId) {
         const savedSession = await getQutrabSession(playerId);
         if (savedSession && savedSession.is_paused === 1) {
-          // Restore game state
-          setDifficulty(savedSession.difficulty as Difficulty);
-          setLevel(savedSession.current_level);
+          // Restore game state (difficulty follows the level)
+          const savedLevel = savedSession.current_level;
+          const savedDifficulty = difficultyForLevel(savedLevel);
+          setDifficulty(savedDifficulty);
+          setLevel(savedLevel);
           setRoundInLevel(savedSession.round_in_level);
           setScore(savedSession.score);
           setStreak(savedSession.streak);
@@ -134,7 +141,7 @@ export const QutrabScreen: React.FC<{
 
           // Generate a new round with fresh usedTriangleIds
           const newUsedIds = new Set<number>();
-          const newRound = generateQutrabRound(undefined, newUsedIds);
+          const newRound = generateQutrabRound(savedDifficulty, newUsedIds);
           setRoundData(newRound);
           newUsedIds.add(newRound.triangle.id);
           setUsedTriangleIds(newUsedIds);
@@ -142,7 +149,7 @@ export const QutrabScreen: React.FC<{
       } else {
         // Start game directly without difficulty selection
         const newUsedIds = new Set<number>();
-        const newRound = generateQutrabRound(undefined, newUsedIds);
+        const newRound = generateQutrabRound("easy", newUsedIds);
         setRoundData(newRound);
         newUsedIds.add(newRound.triangle.id);
         setUsedTriangleIds(newUsedIds);
@@ -161,29 +168,30 @@ export const QutrabScreen: React.FC<{
     }
   };
 
-  // Generate new round - ignores difficulty for mixed gameplay, excludes used triangles
+  // Generate new round from the current difficulty tier, excluding used triangles
   const generateNewRound = useCallback(() => {
-    const newRound = generateQutrabRound(undefined, usedTriangleIds);
+    const newRound = generateQutrabRound(difficulty, usedTriangleIds);
     setRoundData(newRound);
     setSelectedWord(null);
     setMatches([]);
     setRevealed(false);
     // Track this triangle as used
     setUsedTriangleIds((prev) => new Set([...prev, newRound.triangle.id]));
-  }, [usedTriangleIds]);
+  }, [difficulty, usedTriangleIds]);
 
-  // Start game - ignores difficulty, picks from all triangles
+  // Start game at level 1 (easy tier)
   const handleStartGame = useCallback((selectedDifficulty?: Difficulty) => {
-    setDifficulty(selectedDifficulty || "easy");
+    const startDifficulty = selectedDifficulty || "easy";
+    setDifficulty(startDifficulty);
     setShowDifficultySelect(false);
     setLevel(1);
     setRoundInLevel(0);
     setScore(0);
     setStreak(0);
-    
+
     // Reset used triangles for new game session
     const newUsedIds = new Set<number>();
-    const newRound = generateQutrabRound(undefined, newUsedIds);
+    const newRound = generateQutrabRound(startDifficulty, newUsedIds);
     setRoundData(newRound);
     setSelectedWord(null);
     setMatches([]);
@@ -264,21 +272,25 @@ export const QutrabScreen: React.FC<{
     if (roundData) {
       const triangle = roundData.triangle;
       const correctCount = result.correct;
-      let title = '';
-      let content = '';
-      
+      const summary =
+        `${triangle.fatha.word}: ${triangle.fatha.meaning}\n` +
+        `${triangle.kasra.word}: ${triangle.kasra.meaning}\n` +
+        `${triangle.damma.word}: ${triangle.damma.meaning}`;
+      let title = "";
+
       if (correctCount === 3) {
-        title = `أحسنت! مثلث قطرب "${triangle.base}" ✅`;
-        content = `الفتحة: ${triangle.fatha.meaning}\nالضمة: ${triangle.damma.meaning}\nالكسرة: ${triangle.kasra.meaning}`;
+        title = `أحسنت! مثلث "${triangle.base}" ✅`;
       } else if (correctCount >= 1) {
-        title = `جيد! ${correctCount}/3 إجابات صحيحة`;
-        content = `مثلث "${triangle.base}":\nالفتحة: ${triangle.fatha.meaning}\nالضمة: ${triangle.damma.meaning}\nالكسرة: ${triangle.kasra.meaning}`;
+        title = `جيد! ${correctCount}/3 إجابات صحيحة — مثلث "${triangle.base}"`;
       } else {
-        title = 'حاول مرة أخرى!';
-        content = `مثلث "${triangle.base}":\nالفتحة: ${triangle.fatha.meaning}\nالضمة: ${triangle.damma.meaning}\nالكسرة: ${triangle.kasra.meaning}`;
+        title = `حاول مرة أخرى! — مثلث "${triangle.base}"`;
       }
-      
-      setAhsantMessage({ title, content });
+
+      setAhsantMessage({
+        title,
+        content: summary,
+        verse: triangle.verse,
+      });
       setShowAhsantPopup(true);
     }
   }, [matches, calculateRoundScore, score, highScore, playerId, streak, roundData]);
@@ -309,16 +321,18 @@ export const QutrabScreen: React.FC<{
     streak,
   ]);
 
-  // Next level - ignores difficulty progression, excludes used triangles
+  // Next level - difficulty follows the level progression (easy → medium → hard)
   const handleNextLevel = useCallback(() => {
     setShowLevelComplete(false);
     const nextLevel = level + 1;
+    const nextDifficulty = difficultyForLevel(nextLevel);
 
     setLevel(nextLevel);
+    setDifficulty(nextDifficulty);
     setRoundInLevel(0);
 
-    // Generate new round from ANY difficulty (excluding used)
-    const newRound = generateQutrabRound(undefined, usedTriangleIds);
+    // Generate new round from the new tier (excluding used)
+    const newRound = generateQutrabRound(nextDifficulty, usedTriangleIds);
     setRoundData(newRound);
     setSelectedWord(null);
     setMatches([]);
@@ -829,6 +843,12 @@ export const QutrabScreen: React.FC<{
               <Text style={styles.ahsantContent}>
                 {ahsantMessage?.content || ''}
               </Text>
+              {ahsantMessage?.verse ? (
+                <View style={styles.ahsantVerseBox}>
+                  <Text style={styles.ahsantVerseLabel}>من نظم مثلث قطرب:</Text>
+                  <Text style={styles.ahsantVerse}>{ahsantMessage.verse}</Text>
+                </View>
+              ) : null}
               <Text style={styles.ahsantHint}>اضغط للمتابعة</Text>
             </TouchableOpacity>
           </View>
@@ -1456,6 +1476,30 @@ const styles = StyleSheet.create({
     color: COLORS.inkGold,
     textAlign: "center",
     marginTop: SPACING.sm,
+    ...FONTS.arabicText,
+  },
+  ahsantVerseBox: {
+    width: "100%",
+    backgroundColor: COLORS.parchmentDark,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.sm,
+    borderRightWidth: 3,
+    borderRightColor: COLORS.inkGold,
+    marginBottom: SPACING.sm,
+  },
+  ahsantVerseLabel: {
+    fontSize: scaleFontSize(11),
+    color: COLORS.inkGold,
+    textAlign: "right",
+    marginBottom: 2,
+    ...FONTS.arabicTitle,
+  },
+  ahsantVerse: {
+    fontSize: scaleFontSize(13),
+    color: COLORS.inkBrown,
+    textAlign: "center",
+    lineHeight: 22,
+    fontStyle: "italic",
     ...FONTS.arabicText,
   },
 });

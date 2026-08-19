@@ -1,12 +1,13 @@
 {
   "name": "kotrob",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build:data": "node scripts/build-data.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit"
@@ -15,6 +16,10 @@
     "preset": "jest-expo",
     "testMatch": [
       "**/__tests__/**/*.test.ts"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/data/"
     ]
   },
   "dependencies": {

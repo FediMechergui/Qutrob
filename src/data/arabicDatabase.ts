@@ -1,291 +1,195 @@
-// Comprehensive Arabic Roots Database - Roots from ابدذر.json, ز الى ع.json, and القطوف.json
-// This database contains real Arabic trilateral roots (جذور ثلاثية)
+// Arabic Roots Database
+//
+// Built at module load from the generated data produced by
+// `scripts/build-data.js` (run `npm run build:data`):
+//
+//   roots.json        – every valid triliteral root: the complete Lisān al-ʿArab
+//                       inventory (lisan345, 6,529 roots) ∪ the project's own
+//                       annotated roots ∪ ي/و spelling aliases.
+//   rootEntries.json  – rich annotations (meaning, hint, examples, difficulty,
+//                       success message, poetry) for ~3,500 roots, de-duplicated.
+//   rootAliases.json  – alias spelling → canonical Lisān spelling (بكي → بكو).
+//
+// Validity ("is this permutation a real root?") is answered by roots.json, so
+// a player is never penalised for picking a genuine root that merely lacks an
+// annotation. Annotations are an enrichment layer on top.
 
-// Import the JSON databases
-import rootsData from "../../ابدذر.json";
-import rootsDataExtended from "../../ز الى ع.json";
-import qutufData from "../../القطوف.json";
+import generatedRoots from "./generated/roots.json";
+import generatedEntries from "./generated/rootEntries.json";
+import generatedAliases from "./generated/rootAliases.json";
 import { shuffle } from "../utils/random";
 
-// All 28 Arabic letters for random generation
+// All 28 Arabic letters as they appear in roots (hamza as أ; bare ا is never a radical)
 export const ARABIC_LETTERS = [
-  "ا",
-  "ب",
-  "ت",
-  "ث",
-  "ج",
-  "ح",
-  "خ",
-  "د",
-  "ذ",
-  "ر",
-  "ز",
-  "س",
-  "ش",
-  "ص",
-  "ض",
-  "ط",
-  "ظ",
-  "ع",
-  "غ",
-  "ف",
-  "ق",
-  "ك",
-  "ل",
-  "م",
-  "ن",
-  "ه",
-  "و",
-  "ي",
+  "أ", "ب", "ت", "ث", "ج", "ح", "خ", "د", "ذ", "ر", "ز", "س", "ش", "ص",
+  "ض", "ط", "ظ", "ع", "غ", "ف", "ق", "ك", "ل", "م", "ن", "ه", "و", "ي",
 ];
 
-// Letters that work well as first letter (more common in roots)
-export const STRONG_FIRST_LETTERS = [
-  "ب",
-  "ت",
-  "ج",
-  "ح",
-  "خ",
-  "د",
-  "ر",
-  "س",
-  "ش",
-  "ص",
-  "ض",
-  "ط",
-  "ع",
-  "غ",
-  "ف",
-  "ق",
-  "ك",
-  "ل",
-  "م",
-  "ن",
-  "ه",
-  "و",
-];
+export type Difficulty = "easy" | "medium" | "hard";
 
-// Letters that work well as middle letter
-export const STRONG_MIDDLE_LETTERS = [
-  "ا",
-  "ب",
-  "ت",
-  "ث",
-  "ج",
-  "ح",
-  "خ",
-  "د",
-  "ر",
-  "ز",
-  "س",
-  "ش",
-  "ص",
-  "ط",
-  "ع",
-  "ف",
-  "ق",
-  "ك",
-  "ل",
-  "م",
-  "ن",
-  "ه",
-  "و",
-  "ي",
-];
-
-// Type for root info from JSON
+// Type for root info
 export interface RootInfo {
   meaning: string;
   hint: string;
   examples: string;
-  difficulty: "easy" | "medium" | "hard";
+  difficulty: Difficulty;
   successMessage: string;
   poetryExample?: string;
+  // true when the root is attested in Lisān but has no hand-written annotation
+  isLisanOnly?: boolean;
 }
 
 // Helper function to convert root format: "أ ب ب" -> "أبب"
-// Exported so round generation applies the exact same normalization
-// that was used to build the database.
+// Mirrors the normalisation in scripts/build-data.js so lookups always match.
 export function normalizeRoot(root: string): string {
-  return root.replace(/\s+/g, "").replace(/هـ/g, "ه");
+  return (root || "")
+    .replace(/\([^)]*\)|\)|\(/g, "")
+    .replace(/[ً-ْٰـ]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/هـ/g, "ه")
+    .replace(/[إآءؤئ]/g, "أ")
+    .trim();
 }
 
-// Helper function to map difficulty level
-function mapDifficulty(level: string): "easy" | "medium" | "hard" {
-  if (level.includes("سهل") || level.includes("🟢")) return "easy";
-  if (level.includes("متوسط") || level.includes("🟡")) return "medium";
-  if (level.includes("صعب") || level.includes("🔴")) return "hard";
-  return "medium"; // default
-}
+// ---------------------------------------------------------------------------
+// Data
+// ---------------------------------------------------------------------------
 
-// Build the roots database from JSON
-function buildRootsDatabase(): Record<string, RootInfo> {
-  const database: Record<string, RootInfo> = {};
+type GeneratedEntry = {
+  meaning: string;
+  hint: string;
+  examples: string;
+  difficulty: Difficulty;
+  successMessage: string;
+  poetryExample: string;
+};
 
-  // Type for JSON root entry
-  type JsonRootEntry = {
-    الجذر: string;
-    "الشرح المختصر"?: string;
-    التلميح?: string;
-    "أمثلة توضيحية"?: string;
-    المستوى?: string;
-    "أحسنت!"?: string;
-    "أحسنت! "?: string;
-    "الأمثلة الشعرية"?: string;
-  };
+const ENTRIES = generatedEntries as Record<string, GeneratedEntry>;
+const ALIASES = generatedAliases as Record<string, string>;
 
-  // Process first JSON file (ابدذر.json)
-  const jsonRoots = (
-    rootsData as {
-      Feuil1: Array<JsonRootEntry>;
-    }
-  ).Feuil1;
+/** Every valid triliteral root (canonical + aliases). */
+export const VALID_ROOTS_SET: ReadonlySet<string> = new Set(
+  generatedRoots as string[]
+);
 
-  for (const root of jsonRoots) {
-    const normalizedRoot = normalizeRoot(root["الجذر"]);
-
-    // Skip if root doesn't have 3 letters after normalization
-    if (normalizedRoot.length !== 3) continue;
-
-    database[normalizedRoot] = {
-      meaning: root["الشرح المختصر"] || "",
-      hint: root["التلميح"] || root["الشرح المختصر"] || "",
-      examples: root["أمثلة توضيحية"] || "",
-      difficulty: mapDifficulty(root["المستوى"] || ""),
+/** Rich annotations keyed by canonical root. */
+export const VALID_ARABIC_ROOTS: Record<string, RootInfo> = (() => {
+  const db: Record<string, RootInfo> = {};
+  for (const [root, e] of Object.entries(ENTRIES)) {
+    db[root] = {
+      meaning: e.meaning,
+      hint: e.hint || e.meaning,
+      examples: e.examples,
+      difficulty: e.difficulty,
       successMessage:
-        root["أحسنت! "] ||
-        root["أحسنت!"] ||
-        `أحسنت! '${root["الجذر"]}' هو جذر صحيح.`,
-      poetryExample:
-        root["الأمثلة الشعرية"] !== "-" ? root["الأمثلة الشعرية"] : undefined,
+        e.successMessage || `أحسنت! "${root}" جذر صحيح.`,
+      poetryExample: e.poetryExample || undefined,
     };
   }
+  return db;
+})();
 
-  // Process second JSON file (ز الى ع.json)
-  const jsonRootsExtended = (
-    rootsDataExtended as {
-      Feuil1: Array<JsonRootEntry>;
-    }
-  ).Feuil1;
-
-  for (const root of jsonRootsExtended) {
-    const normalizedRoot = normalizeRoot(root["الجذر"]);
-
-    // Skip if root doesn't have 3 letters after normalization
-    if (normalizedRoot.length !== 3) continue;
-
-    // Only add if not already in database (avoid duplicates)
-    if (!database[normalizedRoot]) {
-      database[normalizedRoot] = {
-        meaning: root["الشرح المختصر"] || "",
-        hint: root["التلميح"] || root["الشرح المختصر"] || "",
-        examples: root["أمثلة توضيحية"] || "",
-        difficulty: mapDifficulty(root["المستوى"] || ""),
-        successMessage:
-          root["أحسنت!"] ||
-          root["أحسنت! "] ||
-          `أحسنت! '${root["الجذر"]}' هو جذر صحيح.`,
-        poetryExample:
-          root["الأمثلة الشعرية"] !== "-" ? root["الأمثلة الشعرية"] : undefined,
-      };
-    }
+/** Roots grouped by annotated difficulty (used for level-appropriate questions). */
+export const ROOTS_BY_DIFFICULTY: Record<Difficulty, string[]> = (() => {
+  const byDiff: Record<Difficulty, string[]> = { easy: [], medium: [], hard: [] };
+  for (const [root, info] of Object.entries(VALID_ARABIC_ROOTS)) {
+    byDiff[info.difficulty].push(root);
   }
+  return byDiff;
+})();
 
-  // Process القطوف.json - the main comprehensive database with ALL difficulty levels
-  // This ensures roots from any difficulty can appear in any round
-  try {
-    const qutufEntries: any[] = (qutufData as any)?.Feuil1 || [];
-    for (const entry of qutufEntries) {
-      if (!entry || !entry["الجذر"]) continue;
+/** Roots attested in Lisān that have no annotation (rarer vocabulary). */
+export const LISAN_ONLY_ROOTS: string[] = (generatedRoots as string[]).filter(
+  (r) => !ENTRIES[r] && !ALIASES[r]
+);
 
-      const normalizedRoot = normalizeRoot(entry["الجذر"]);
+// ---------------------------------------------------------------------------
+// Lookups
+// ---------------------------------------------------------------------------
 
-      // Skip if root doesn't have 3 letters after normalization
-      if (normalizedRoot.length !== 3) continue;
-
-      // Only add if not already in database (avoid duplicates)
-      if (!database[normalizedRoot]) {
-        database[normalizedRoot] = {
-          meaning: entry["الشرح المختصر"] || entry["التحليل النهائي"] || "",
-          hint: entry["التلميح"] || entry["الشرح المختصر"] || "",
-          examples: entry["أمثلة توضيحية"] || "",
-          difficulty: mapDifficulty(entry["المستوى"] || ""),
-          successMessage:
-            entry["التحليل النهائي"] ||
-            `أحسنت! '${entry["الجذر"]}' هو جذر صحيح.`,
-          poetryExample:
-            entry["الأمثلة الشعرية"] && entry["الأمثلة الشعرية"] !== "-"
-              ? entry["الأمثلة الشعرية"]
-              : undefined,
-        };
-      }
-    }
-  } catch (e) {
-    console.warn("Failed to load roots from القطوف.json:", e);
-  }
-
-  return database;
+/** Resolve an alias spelling (بكي) to its canonical key (بكو). */
+export function canonicalRoot(root: string): string {
+  const n = normalizeRoot(root);
+  return ALIASES[n] || n;
 }
-
-// Build database once at module load
-export const VALID_ARABIC_ROOTS: Record<string, RootInfo> =
-  buildRootsDatabase();
-
-// Get all valid roots as a Set for quick lookup
-export const VALID_ROOTS_SET = new Set(Object.keys(VALID_ARABIC_ROOTS));
 
 // Function to check if a root is valid
 export function isValidRoot(root: string): boolean {
   return VALID_ROOTS_SET.has(root);
 }
 
-// Function to get root info
-export function getRootInfo(root: string) {
-  return VALID_ARABIC_ROOTS[root] || null;
+/**
+ * Get info for a root. Annotated roots return their full entry; roots that are
+ * only attested in Lisān return a minimal, honest entry so the UI can still
+ * confirm validity without inventing a meaning.
+ */
+export function getRootInfo(root: string): RootInfo | null {
+  const key = canonicalRoot(root);
+  const info = VALID_ARABIC_ROOTS[key];
+  if (info) return info;
+  if (VALID_ROOTS_SET.has(key) || VALID_ROOTS_SET.has(root)) {
+    return {
+      meaning: "",
+      hint: "",
+      examples: "",
+      difficulty: "hard",
+      successMessage: `أحسنت! "${root}" جذر صحيح ورد في لسان العرب.`,
+      isLisanOnly: true,
+    };
+  }
+  return null;
 }
 
-// Generate all 6 permutations of 3 letters
+/** Whether the root has a hand-written annotation (meaning/analysis). */
+export function hasAnnotation(root: string): boolean {
+  return !!VALID_ARABIC_ROOTS[canonicalRoot(root)];
+}
+
+// ---------------------------------------------------------------------------
+// Permutations
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate the distinct permutations of 3 letters. For distinct letters this is
+ * 6; for roots with a repeated letter (أبب, أسس…) it is 3; for a tripled letter
+ * it is 1. De-duplicating here is what prevents the same option appearing twice
+ * in the grid.
+ */
 export function generateAllPermutations(
   letters: [string, string, string]
 ): string[] {
   const [a, b, c] = letters;
-  return [a + b + c, a + c + b, b + a + c, b + c + a, c + a + b, c + b + a];
+  const all = [a + b + c, a + c + b, b + a + c, b + c + a, c + a + b, c + b + a];
+  return Array.from(new Set(all));
 }
 
 // Find valid roots from permutations
 export function findValidRoots(letters: [string, string, string]): string[] {
-  const permutations = generateAllPermutations(letters);
-  return permutations.filter((p) => isValidRoot(p));
+  return generateAllPermutations(letters).filter((p) => isValidRoot(p));
 }
+
+// ---------------------------------------------------------------------------
+// Letter selection helpers
+// ---------------------------------------------------------------------------
 
 // Get a letter set that has at least one valid root
 export function getLettersWithValidRoots(
-  difficulty: "easy" | "medium" | "hard",
+  difficulty: Difficulty,
   minValidRoots: number = 1,
   maxValidRoots: number = 3
 ): [string, string, string] | null {
-  // Get roots of the specified difficulty
-  const rootsOfDifficulty = Object.entries(VALID_ARABIC_ROOTS)
-    .filter(([_, info]) => info.difficulty === difficulty)
-    .map(([root]) => root);
-
+  const rootsOfDifficulty = ROOTS_BY_DIFFICULTY[difficulty];
   if (rootsOfDifficulty.length === 0) return null;
 
   // Try to find a good letter combination
   for (let attempt = 0; attempt < 100; attempt++) {
     const randomRoot =
       rootsOfDifficulty[Math.floor(Math.random() * rootsOfDifficulty.length)];
-    const letters: [string, string, string] = [
-      randomRoot[0],
-      randomRoot[1],
-      randomRoot[2],
+    const letters = shuffle([randomRoot[0], randomRoot[1], randomRoot[2]]) as [
+      string,
+      string,
+      string
     ];
-
-    // Shuffle the letters
-    for (let i = letters.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [letters[i], letters[j]] = [letters[j], letters[i]];
-    }
 
     const validRoots = findValidRoots(letters);
     if (
