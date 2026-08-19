@@ -7,6 +7,7 @@ import {
   Dimensions,
   Easing,
   Image,
+  TouchableOpacity,
 } from "react-native";
 import {
   COLORS,
@@ -31,6 +32,12 @@ interface ClamAnimationProps {
   proverb: string;
   proverbMeaning: string;
   onAnimationComplete?: () => void;
+  /**
+   * When provided, a scuba-diver icon appears under the pearl's text; tapping
+   * it "dives deeper" into the full context of the card.
+   */
+  onDive?: () => void;
+  diveLabel?: string;
 }
 
 const { width, height } = Dimensions.get("window");
@@ -49,6 +56,8 @@ export const ClamAnimation: React.FC<ClamAnimationProps> = ({
   proverb,
   proverbMeaning,
   onAnimationComplete,
+  onDive,
+  diveLabel = "اغطس لتعرف المزيد",
 }) => {
   const [animationPhase, setAnimationPhase] = useState<
     "closed" | "opening" | "open" | "revealing"
@@ -321,6 +330,20 @@ export const ClamAnimation: React.FC<ClamAnimationProps> = ({
                 <View style={styles.dividerLine} />
               </View>
               <Text style={styles.meaningText}>{proverbMeaning}</Text>
+
+              {/* Scuba diver: dive deeper into the card's context */}
+              {onDive && (
+                <TouchableOpacity
+                  style={styles.diveButton}
+                  onPress={onDive}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={diveLabel}
+                >
+                  <Text style={styles.diveIcon}>🤿</Text>
+                  <Text style={styles.diveLabel}>{diveLabel}</Text>
+                </TouchableOpacity>
+              )}
             </Animated.View>
           </View>
         </Animated.View>
@@ -446,6 +469,26 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: "center",
     fontStyle: "italic",
+  },
+  diveButton: {
+    marginTop: isSmallDevice ? SPACING.sm : SPACING.md,
+    alignSelf: "center",
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: SPACING.xs,
+    backgroundColor: COLORS.turquoise,
+    paddingVertical: isSmallDevice ? 4 : 6,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.round,
+    ...SHADOWS.small,
+  },
+  diveIcon: {
+    fontSize: scaleFontSize(isSmallDevice ? 18 : 22),
+  },
+  diveLabel: {
+    fontSize: scaleFontSize(isSmallDevice ? 11 : 13),
+    color: COLORS.textLight,
+    ...FONTS.arabicTitle,
   },
   title: {
     fontSize: scaleFontSize(isSmallDevice ? 22 : 26),

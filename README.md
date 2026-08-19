@@ -46,10 +46,12 @@ The app includes two game modes:
 ### 📚 Rich Content
 - **6,700+ valid triliteral roots**: the full Lisān al-ʿArab inventory ([lisan345](https://github.com/git85hub/lisan345)) merged with the project's own annotated roots
 - **~3,500 annotated roots** with meaning, hint, examples, difficulty and linguistic analysis; **1,900+** with poetry
+- **4,000+ roots with the dictionary's own words**: opening excerpt of the root's entry in لسان العرب (from Arabic Wikisource) — the explanation for rare roots, extra context everywhere else
 - **58 educational facts** (`أحسنت.json`) shown as «هل تعلم»
 - Reward videos that unlock into a rewatchable archive
 
 ### 🏆 Progress & Rewards
+- Level-end clam opens on a pearl with a proverb; tap the 🤿 diver to dive into the full context (proverb explanation, «هل تعلم» fact, every root/triangle learned in the level) and save it as a card
 - Points banked per round, plus streak tracking (no double counting)
 - Per-game high scores and a global total score
 - Persistent progress with SQLite (localStorage fallback on web)
@@ -113,7 +115,7 @@ eas build --platform ios --profile production
 
 ## 📡 OTA Updates
 
-The app ships with [EAS Update](https://docs.expo.dev/eas-update/introduction/) (expo-updates). On every cold start it checks for a newer JS bundle on its channel, downloads it, and reloads — no store release needed for JS/data changes.
+The app ships with [EAS Update](https://docs.expo.dev/eas-update/introduction/) (expo-updates). On every cold start it checks for a newer JS bundle on its channel, downloads it, and reloads — no store release needed for JS/data changes. Players can also pull the latest release on demand with the **⬇️ تنزيل التحديثات** button on the Home screen (shows the installed version/update id).
 
 ```bash
 # Publish an over-the-air update to the production channel
@@ -145,7 +147,13 @@ Raw sources live in `data/` (see [data/README.md](data/README.md)); the app bund
 npm run build:data
 ```
 
-The script normalises roots (spaces, tashkeel, hamza forms, `هـ`), de-duplicates ~2,000 repeated rows, reconciles weak-root spellings with Lisān (بكي ↔ بكو), drops unreconcilable typos, and emits `roots.json`, `rootEntries.json`, `rootAliases.json` and `stats.json`. A test asserts the committed outputs match a fresh build.
+The script normalises roots (spaces, tashkeel, hamza forms, `هـ`), de-duplicates ~2,000 repeated rows, reconciles weak-root spellings with Lisān (بكي ↔ بكو), drops unreconcilable typos, and emits `roots.json`, `rootEntries.json`, `rootAliases.json`, `lisanExcerpts.json` and `stats.json`. A test asserts the committed outputs match a fresh build.
+
+To refresh the Lisān al-ʿArab excerpts from Arabic Wikisource (network):
+
+```bash
+npm run enrich:lisan && npm run build:data
+```
 
 ---
 
@@ -222,6 +230,7 @@ Qutrob/
 | [lisan345](https://github.com/git85hub/lisan345) (Elmaz 2026) | Every triliteral root in Lisān al-ʿArab — validity ground truth | 6,529 |
 | `القطوف.json` | Annotated roots: meaning, hint, examples, difficulty, poetry, analysis | ~3,300 unique |
 | `ابدذر.json` / `ز الى ع.json` | Older annotated volumes (أ–ذ, ذ–ع) | ~170 extra roots |
+| [لسان العرب on Arabic Wikisource](https://ar.wikisource.org/wiki/لسان_العرب) | Opening excerpt of each root's dictionary entry | 4,000+ |
 | نظم مثلث قطرب (Ibn Zurayq) | Canonical Qutrub triangles with verses | 23 (+7 classics) |
 | `أحسنت.json` | Educational facts («هل تعلم») | 58 |
 

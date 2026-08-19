@@ -22,9 +22,10 @@ import {
 } from "../constants/theme";
 import {
   QutrabRoundData,
+  QutrabTriangle,
   generateQutrabRound,
 } from "../data/qutrabData";
-import { ClamAnimation } from "../components";
+import { ClamAnimation, LevelDiveModal, DiveSection } from "../components";
 import { ARABIC_PROVERBS } from "../services/arabicApi";
 import {
   scaleFontSize,
@@ -40,6 +41,7 @@ import {
   getGlobalScores,
   saveCompletedLevel,
   saveGameHistory,
+  unlockCard,
 } from "../services/database";
 import {
   QUTRAB_DIFFICULTY_CONFIG,
@@ -88,6 +90,10 @@ export const QutrabScreen: React.FC<{
   const [streak, setStreak] = useState(0);
   // Track used triangle IDs to prevent repeats within a session
   const [usedTriangleIds, setUsedTriangleIds] = useState<Set<number>>(new Set());
+  // Level-complete pearl: triangles seen this level + dive-deeper view
+  const [levelTriangles, setLevelTriangles] = useState<QutrabTriangle[]>([]);
+  const [showLevelDive, setShowLevelDive] = useState(false);
+  const [levelCardSaved, setLevelCardSaved] = useState(false);
 
   // UI state
   const [showDifficultySelect, setShowDifficultySelect] = useState(false); // Start game directly, no difficulty selection
@@ -249,6 +255,15 @@ export const QutrabScreen: React.FC<{
     const newScore = score + result.pointsEarned;
     setScore(newScore);
 
+    // Remember this level's triangles for the pearl card
+    if (roundData) {
+      setLevelTriangles((prev) =>
+        prev.some((t) => t.id === roundData.triangle.id)
+          ? prev
+          : [...prev, roundData.triangle]
+      );
+    }
+
     const newStreak = result.isPerfect ? streak + 1 : 0;
     setStreak(newStreak);
 
@@ -306,6 +321,7 @@ export const QutrabScreen: React.FC<{
         await saveCompletedLevel(playerId, "qutrab", level.toString());
         await saveGameHistory(playerId, "qutrab", score, streak, level);
       }
+      setLevelCardSaved(false);
       setShowLevelComplete(true);
     } else {
       setRoundInLevel(nextRoundInLevel);
@@ -321,9 +337,52 @@ export const QutrabScreen: React.FC<{
     streak,
   ]);
 
+  const levelProverb = ARABIC_PROVERBS[(level - 1) % ARABIC_PROVERBS.length];
+
+  // Sections of the level's dive-deeper card
+  const buildLevelDiveSections = useCallback((): DiveSection[] => {
+    const sections: DiveSection[] = [
+      { heading: "📜 المثل", body: levelProverb.text, quote: levelProverb.meaning },
+    ];
+    if (levelTriangles.length > 0) {
+      sections.push({
+        heading: `🔺 مثلثات هذا المستوى (${levelTriangles.length})`,
+        items: levelTriangles.map((t) => ({
+          title: t.base,
+          text:
+            `${t.fatha.word}: ${t.fatha.meaning}\n` +
+            `${t.kasra.word}: ${t.kasra.meaning}\n` +
+            `${t.damma.word}: ${t.damma.meaning}`,
+          note: t.verse ? `من نظم مثلث قطرب: ${t.verse.replace(/\n/g, " / ")}` : undefined,
+        })),
+      });
+    }
+    return sections;
+  }, [levelProverb, levelTriangles]);
+
+  // Save the level's pearl as a card in البطاقات
+  const handleSaveLevelCard = useCallback(async () => {
+    if (!playerId || levelCardSaved) return;
+    try {
+      await unlockCard(playerId, {
+        id: `pearl-qutrab-L${level}-${(level - 1) % ARABIC_PROVERBS.length}`,
+        title: `🦪 لؤلؤة مثلث قطرب — المستوى ${level}`,
+        description: `${levelProverb.text} — ${levelProverb.meaning}`,
+        notes: levelTriangles.map(
+          (t) => `🔺 ${t.base}: ${t.fatha.word} / ${t.kasra.word} / ${t.damma.word}`
+        ),
+      });
+      setLevelCardSaved(true);
+    } catch (e) {
+      console.error("Error saving level card:", e);
+    }
+  }, [playerId, levelCardSaved, level, levelProverb, levelTriangles]);
+
   // Next level - difficulty follows the level progression (easy → medium → hard)
   const handleNextLevel = useCallback(() => {
     setShowLevelComplete(false);
+    setShowLevelDive(false);
+    setLevelTriangles([]);
     const nextLevel = level + 1;
     const nextDifficulty = difficultyForLevel(nextLevel);
 
@@ -561,8 +620,7 @@ export const QutrabScreen: React.FC<{
 
   // Level complete
   if (showLevelComplete) {
-    const currentProverb =
-      ARABIC_PROVERBS[(level - 1) % ARABIC_PROVERBS.length];
+    const currentProverb = levelProverb;
     return (
       <LinearGradient
         colors={[COLORS.parchment, COLORS.parchmentDark, COLORS.parchment]}
@@ -583,6 +641,8 @@ export const QutrabScreen: React.FC<{
               isOpen={true}
               proverb={currentProverb.text}
               proverbMeaning={currentProverb.meaning ?? ""}
+              onDive={() => setShowLevelDive(true)}
+              diveLabel="اغطس لتعرف المزيد"
             />
 
             <View style={styles.levelScoreContainer}>
@@ -596,6 +656,16 @@ export const QutrabScreen: React.FC<{
             >
               <Text style={styles.nextLevelButtonText}>المستوى التالي ←</Text>
             </TouchableOpacity>
+
+            <LevelDiveModal
+              visible={showLevelDive}
+              title={`لؤلؤة المستوى ${level}`}
+              subtitle={`${difficultyConfig.nameAr} · ${levelTriangles.length} مثلث`}
+              sections={buildLevelDiveSections()}
+              onClose={() => setShowLevelDive(false)}
+              onSaveCard={playerId ? handleSaveLevelCard : undefined}
+              cardSaved={levelCardSaved}
+            />
           </ScrollView>
         </SafeAreaView>
       </LinearGradient>

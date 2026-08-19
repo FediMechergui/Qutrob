@@ -9,14 +9,18 @@
 //   rootEntries.json  – rich annotations (meaning, hint, examples, difficulty,
 //                       success message, poetry) for ~3,500 roots, de-duplicated.
 //   rootAliases.json  – alias spelling → canonical Lisān spelling (بكي → بكو).
+//   lisanExcerpts.json – opening excerpt of the root's entry in Lisān al-ʿArab
+//                       (ar.wikisource), produced by scripts/enrich-lisan.js.
 //
 // Validity ("is this permutation a real root?") is answered by roots.json, so
 // a player is never penalised for picking a genuine root that merely lacks an
-// annotation. Annotations are an enrichment layer on top.
+// annotation. Explanations come in two layers: the hand-written annotation
+// when one exists, otherwise the dictionary's own words from Lisān.
 
 import generatedRoots from "./generated/roots.json";
 import generatedEntries from "./generated/rootEntries.json";
 import generatedAliases from "./generated/rootAliases.json";
+import generatedExcerpts from "./generated/lisanExcerpts.json";
 import { shuffle } from "../utils/random";
 
 // All 28 Arabic letters as they appear in roots (hamza as أ; bare ا is never a radical)
@@ -27,6 +31,9 @@ export const ARABIC_LETTERS = [
 
 export type Difficulty = "easy" | "medium" | "hard";
 
+/** Where a root's explanation comes from. */
+export type RootInfoSource = "annotated" | "lisan" | "none";
+
 // Type for root info
 export interface RootInfo {
   meaning: string;
@@ -35,6 +42,7 @@ export interface RootInfo {
   difficulty: Difficulty;
   successMessage: string;
   poetryExample?: string;
+  source: RootInfoSource;
   // true when the root is attested in Lisān but has no hand-written annotation
   isLisanOnly?: boolean;
 }
@@ -66,13 +74,14 @@ type GeneratedEntry = {
 
 const ENTRIES = generatedEntries as Record<string, GeneratedEntry>;
 const ALIASES = generatedAliases as Record<string, string>;
+const EXCERPTS = generatedExcerpts as Record<string, string>;
 
 /** Every valid triliteral root (canonical + aliases). */
 export const VALID_ROOTS_SET: ReadonlySet<string> = new Set(
   generatedRoots as string[]
 );
 
-/** Rich annotations keyed by canonical root. */
+/** Rich hand-written annotations keyed by canonical root. */
 export const VALID_ARABIC_ROOTS: Record<string, RootInfo> = (() => {
   const db: Record<string, RootInfo> = {};
   for (const [root, e] of Object.entries(ENTRIES)) {
@@ -84,10 +93,17 @@ export const VALID_ARABIC_ROOTS: Record<string, RootInfo> = (() => {
       successMessage:
         e.successMessage || `أحسنت! "${root}" جذر صحيح.`,
       poetryExample: e.poetryExample || undefined,
+      source: "annotated",
     };
   }
   return db;
 })();
+
+/** Opening excerpt of the root's Lisān al-ʿArab entry, when transcribed. */
+export function getLisanExcerpt(root: string): string | undefined {
+  const key = canonicalRoot(root);
+  return EXCERPTS[key] || EXCERPTS[normalizeRoot(root)] || undefined;
+}
 
 /** Roots grouped by annotated difficulty (used for level-appropriate questions). */
 export const ROOTS_BY_DIFFICULTY: Record<Difficulty, string[]> = (() => {
@@ -119,25 +135,39 @@ export function isValidRoot(root: string): boolean {
 }
 
 /**
- * Get info for a root. Annotated roots return their full entry; roots that are
- * only attested in Lisān return a minimal, honest entry so the UI can still
- * confirm validity without inventing a meaning.
+ * Get info for a root, in order of preference:
+ *   1. the hand-written annotation;
+ *   2. an entry synthesised from the root's own Lisān al-ʿArab excerpt;
+ *   3. a minimal, honest entry for roots attested in Lisān but not transcribed —
+ *      validity is confirmed without inventing a meaning.
  */
 export function getRootInfo(root: string): RootInfo | null {
   const key = canonicalRoot(root);
   const info = VALID_ARABIC_ROOTS[key];
   if (info) return info;
-  if (VALID_ROOTS_SET.has(key) || VALID_ROOTS_SET.has(root)) {
+  if (!VALID_ROOTS_SET.has(key) && !VALID_ROOTS_SET.has(root)) return null;
+
+  const excerpt = getLisanExcerpt(key);
+  if (excerpt) {
     return {
-      meaning: "",
+      meaning: excerpt,
       hint: "",
       examples: "",
       difficulty: "hard",
-      successMessage: `أحسنت! "${root}" جذر صحيح ورد في لسان العرب.`,
+      successMessage: `أحسنت! "${root}" جذر صحيح. جاء في لسان العرب: ${excerpt}`,
+      source: "lisan",
       isLisanOnly: true,
     };
   }
-  return null;
+  return {
+    meaning: "",
+    hint: "",
+    examples: "",
+    difficulty: "hard",
+    successMessage: `أحسنت! "${root}" جذر صحيح ورد في لسان العرب.`,
+    source: "none",
+    isLisanOnly: true,
+  };
 }
 
 /** Whether the root has a hand-written annotation (meaning/analysis). */
