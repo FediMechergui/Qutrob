@@ -35,9 +35,8 @@ import {
   ARABIC_PROVERBS,
   Difficulty,
 } from "../services/arabicApi";
-import { normalizeRoot } from "../data/arabicDatabase";
-import qutufData from "../../القطوف.json";
-import ahsantJson from "../../أحسنت.json";
+import { getRootInfo, canonicalRoot } from "../data/arabicDatabase";
+import ahsantJson from "../../data/أحسنت.json";
 import {
   saveRootsSession,
   getRootsSession,
@@ -56,6 +55,9 @@ import {
   ROOTS_DIFFICULTY_CONFIG,
   difficultyForLevel,
   calculateRootsRoundScore,
+  buildHints,
+  hintCost,
+  spinCost,
 } from "../utils/scoring";
 import { pickRandom } from "../utils/random";
 import { scaleFontSize } from "../utils/responsive";
@@ -112,6 +114,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
   const [hintsUsed, setHintsUsed] = useState(0);
+  const [spinsUsed, setSpinsUsed] = useState(0);
   const [highScore, setHighScore] = useState(0);
   // Track used roots to prevent repeats within a session
   const [usedRoots, setUsedRoots] = useState<Set<string>>(new Set());
@@ -154,40 +157,21 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const difficultyConfig = DIFFICULTY_CONFIG[difficulty];
   const currentProverb = LEVEL_PROVERBS[(level - 1) % LEVEL_PROVERBS.length];
 
-  // Generate hints from round data
-  const generateHints = useCallback(() => {
-    if (!roundData) return [];
-    const hints: { title: string; text: string; meaning?: string }[] = [];
-
-    // Add valid count hint
-    hints.push({
-      title: "عدد الجذور",
-      text: `عدد الجذور الصحيحة: ${roundData.validRoots.length}`,
-    });
-
-    // Add meaning hints for valid roots
-    roundData.validRoots.forEach((root: string) => {
-      if (roundData.meanings[root]) {
-        hints.push({
-          title: "تلميح معنى",
-          text: roundData.meanings[root],
-          meaning: `هذا المعنى يشير إلى أحد الجذور الصحيحة`,
-        });
-      }
-    });
-
-    return hints;
-  }, [roundData]);
-
-  const hints = generateHints();
+  // Progressive hints (count → first letter → meanings), priced per difficulty
+  const hints = roundData
+    ? buildHints({
+        validRoots: roundData.validRoots,
+        meanings: roundData.meanings,
+      })
+    : [];
+  const nextHintCost = hintCost(hintsUsed, difficultyConfig);
 
   const handleUseHint = useCallback(() => {
-    setHintsUsed((prev) => {
-      if (prev >= hints.length) return prev;
-      return prev + 1;
-    });
-    setScore((prev) => Math.max(0, prev - 10));
-  }, [hints.length]);
+    if (hintsUsed >= hints.length) return;
+    const cost = hintCost(hintsUsed, difficultyConfig);
+    setHintsUsed((prev) => prev + 1);
+    setScore((prev) => Math.max(0, prev - cost));
+  }, [hintsUsed, hints.length, difficultyConfig]);
 
   // Load saved data
   useEffect(() => {
@@ -287,6 +271,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     setSelectedRoots(new Set());
     setRevealedRoots(false);
     setHintsUsed(0);
+    setSpinsUsed(0);
     setUsedRoots((prev) => new Set([...prev, newRoundData.usedKey]));
   }, [difficulty, usedRoots]);
 
@@ -308,14 +293,21 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     setSelectedRoots(new Set());
     setRevealedRoots(false);
     setHintsUsed(0);
+    setSpinsUsed(0);
     newUsedRoots.add(newRoundData.usedKey);
     setUsedRoots(newUsedRoots);
   }, []);
 
-  // Handle letter rotation - generates completely NEW random letters
+  // Handle letter rotation - generates completely NEW random letters.
+  // The first spin per round is free; further spins cost points.
+  const currentSpinCost = spinCost(spinsUsed, difficultyConfig);
+
   const handleRotate = useCallback(() => {
     if (isSpinning || revealedRoots) return;
 
+    const cost = spinCost(spinsUsed, difficultyConfig);
+    setSpinsUsed((prev) => prev + 1);
+    if (cost > 0) setScore((prev) => Math.max(0, prev - cost));
     setIsSpinning(true);
 
     // Wait for spin animation (simulated delay)
@@ -325,10 +317,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({
       setRoundData(newRoundData);
       setCurrentLetters([...newRoundData.letters] as [string, string, string]);
       setSelectedRoots(new Set());
+      setHintsUsed(0);
       setUsedRoots((prev) => new Set([...prev, newRoundData.usedKey]));
       setIsSpinning(false);
     }, 800);
-  }, [difficulty, usedRoots, isSpinning, revealedRoots]);
+  }, [difficulty, usedRoots, isSpinning, revealedRoots, spinsUsed, difficultyConfig]);
 
   // Generate root options from current round
   const rootOptions: RootOption[] =
@@ -382,7 +375,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     (root: string) => {
       if (roundData && roundData.validRoots.includes(root)) {
         setDefinitionRoot(root);
-        setDefinitionMeaning(roundData.meanings[root] || "جذر صحيح");
+        setDefinitionMeaning(
+          roundData.meanings[root] ||
+            roundData.successMessages[root] ||
+            "جذر صحيح ورد في لسان العرب"
+        );
         setDefinitionPoetry(roundData.poetryExamples[root]);
         setDefinitionDifficulty(roundData.difficulty || difficulty);
         setShowDefinitionModal(true);
@@ -439,59 +436,50 @@ export const GameScreen: React.FC<GameScreenProps> = ({
 
       if (correctRoots.length === 0) return;
 
-      const validRoot = correctRoots[0];
-      const rootMeaning =
-        roundData.successMessages?.[validRoot] ||
-        roundData.meanings?.[validRoot] ||
-        "";
+      // Prefer a root that has a written explanation for the popup
+      const validRoot =
+        correctRoots.find((r) => roundData.meanings?.[r]) || correctRoots[0];
+      const rootInfo = getRootInfo(validRoot);
+      const analysis =
+        roundData.successMessages?.[validRoot] || rootInfo?.successMessage || "";
+      const rootMeaning = roundData.meanings?.[validRoot] || rootInfo?.meaning || "";
 
-      const qutufList = (qutufData as any)?.Feuil1;
-      const qutufEntry = Array.isArray(qutufList)
-        ? qutufList.find(
-            (item: any) =>
-              typeof item?.["الجذر"] === "string" &&
-              normalizeRoot(item["الجذر"]) === normalizeRoot(validRoot)
-          )
-        : null;
+      // Unlockable card built from the annotated entry (only when one exists)
+      const unlockableCard =
+        rootInfo && !rootInfo.isLisanOnly
+          ? {
+              id: `root-${canonicalRoot(validRoot)}`,
+              title: `📜 ${validRoot}`,
+              description: rootInfo.meaning || analysis,
+              notes: [
+                rootInfo.hint && rootInfo.hint !== rootInfo.meaning
+                  ? `💡 ${rootInfo.hint}`
+                  : null,
+                rootInfo.examples ? `📌 ${rootInfo.examples}` : null,
+                rootInfo.poetryExample ? `📜 ${rootInfo.poetryExample}` : null,
+              ].filter(Boolean) as string[],
+            }
+          : null;
 
-      const unlockableCard = qutufEntry
-        ? {
-            id: `root-${normalizeRoot(validRoot)}`,
-            title: `📜 ${qutufEntry["الجذر"] || validRoot}`,
-            description: qutufEntry["الشرح المختصر"] || rootMeaning || "",
-            notes: [
-              qutufEntry["التلميح"] ? `💡 ${qutufEntry["التلميح"]}` : null,
-              qutufEntry["أمثلة توضيحية"]
-                ? `📌 ${qutufEntry["أمثلة توضيحية"]}`
-                : null,
-            ].filter(Boolean) as string[],
-          }
-        : null;
-
-      // Pick a random أحسنت entry for explanation/variant
+      // A random «هل تعلم» fact and a real proverb
       const ahsantFact = pickRandom(ahsant) ?? null;
-
-      // Pick a random proverb
       const proverb = pickRandom(ARABIC_PROVERBS) ?? null;
 
       setPopupItem({
-        title: `🎉 أحسنت! الجذر \"${validRoot}\" صحيح ✅`,
+        title: `🎉 أحسنت! الجذر "${validRoot}" صحيح ✅`,
         content: [
-          rootMeaning
-            ? `معنى الجذر: ${rootMeaning}`
-            : "أحسنت! لقد أجبت بشكل صحيح",
+          analysis || (rootMeaning ? `معنى الجذر: ${rootMeaning}` : "أحسنت! لقد أجبت بشكل صحيح"),
+          correctRoots.length > 1
+            ? `✅ أصبت أيضاً: ${correctRoots.filter((r) => r !== validRoot).join("، ")}`
+            : null,
           ahsantFact
-            ? `💡 ${ahsantFact.title}:\n${
+            ? `💡 هل تعلم؟ ${ahsantFact.title}\n${
                 Array.isArray(ahsantFact.content)
                   ? ahsantFact.content.join("\n")
                   : ahsantFact.content
               }`
             : null,
-          proverb
-            ? `📜 مثل: ${proverb.text}${
-                proverb.meaning ? `\n${proverb.meaning}` : ""
-              }`
-            : null,
+          proverb ? `📜 مثل: ${proverb.text}\n${proverb.meaning}` : null,
         ].filter(Boolean),
         unlockableCard,
       });
@@ -554,6 +542,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     setSelectedRoots(new Set());
     setRevealedRoots(false);
     setHintsUsed(0);
+    setSpinsUsed(0);
     setUsedRoots((prev) => new Set([...prev, newRoundData.usedKey]));
   }, [level, usedRoots]);
 
@@ -572,6 +561,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           setScore(0);
           setStreak(0);
           setHintsUsed(0);
+          setSpinsUsed(0);
           setSelectedRoots(new Set());
           setRevealedRoots(false);
           setShowLevelComplete(false);
@@ -942,6 +932,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
               onRotate={handleRotate}
               disabled={revealedRoots}
               isSpinning={isSpinning}
+              spinCost={currentSpinCost}
             />
           </View>
 
@@ -995,7 +986,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                 );
               })()}
               <Text style={styles.tapHintText}>
-                اضغط على الجذر لمعرفة معناه
+                {roundData?.hasExplanation
+                  ? "اضغط على الجذر لمعرفة معناه"
+                  : "جذر نادر من لسان العرب — اضغط عليه للتأكيد"}
               </Text>
             </View>
           )}
@@ -1007,6 +1000,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           hints={hints}
           hintsUsed={hintsUsed}
           maxHints={hints.length}
+          nextHintCost={nextHintCost}
           onUseHint={handleUseHint}
           onClose={() => setShowHintModal(false)}
         />

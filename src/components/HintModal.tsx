@@ -31,6 +31,8 @@ interface HintModalProps {
   hints: { title: string; text: string; meaning?: string }[];
   hintsUsed: number;
   maxHints: number;
+  /** Points deducted for the next hint (escalates per hint and difficulty). */
+  nextHintCost?: number;
   onUseHint: () => void;
   onClose: () => void;
 }
@@ -40,6 +42,7 @@ export const HintModal: React.FC<HintModalProps> = ({
   hints,
   hintsUsed,
   maxHints,
+  nextHintCost = 10,
   onUseHint,
   onClose,
 }) => {
@@ -89,7 +92,9 @@ export const HintModal: React.FC<HintModalProps> = ({
             {hintsUsed === 0 && (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>لم تستخدم أي تلميحات بعد</Text>
-                <Text style={styles.emptySubtext}>كل تلميح يكلفك 10 نقاط</Text>
+                <Text style={styles.emptySubtext}>
+                  التلميحات تتدرج من الأسهل إلى الأوضح، وتزداد كلفتها
+                </Text>
               </View>
             )}
           </View>
@@ -106,7 +111,7 @@ export const HintModal: React.FC<HintModalProps> = ({
             >
               <Text style={styles.useHintText}>
                 {canUseHint
-                  ? "استخدم تلميح (-10 نقاط)"
+                  ? `استخدم تلميح (−${nextHintCost} نقطة)`
                   : "لا توجد تلميحات متاحة"}
               </Text>
             </TouchableOpacity>

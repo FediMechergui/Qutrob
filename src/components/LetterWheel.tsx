@@ -12,6 +12,8 @@ interface LetterWheelProps {
   onRotate: () => void;
   disabled?: boolean;
   isSpinning?: boolean;
+  /** Points the next spin will cost (0 = free). Shown on the wheel. */
+  spinCost?: number;
 }
 
 // Height-aware wheel size - smaller on short screens.
@@ -40,6 +42,7 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
   onRotate,
   disabled = false,
   isSpinning = false,
+  spinCost = 0,
 }) => {
   const responsive = useResponsive();
   const { wheelSize, letterBoxSize } = getWheelGeometry(responsive);
@@ -207,7 +210,11 @@ export const LetterWheel: React.FC<LetterWheelProps> = ({
 
             {/* Rotate instruction */}
             <Text style={styles.rotateText}>
-              {isSpinning ? "جاري التدوير..." : "اضغط لحروف جديدة 🔄"}
+              {isSpinning
+                ? "جاري التدوير..."
+                : spinCost > 0
+                ? `حروف جديدة (−${spinCost} نقطة) 🔄`
+                : "اضغط لحروف جديدة 🔄"}
             </Text>
 
             {/* Decorative pattern */}
