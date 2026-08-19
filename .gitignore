@@ -42,3 +42,6 @@ coverage/
 # generated native folders
 /ios
 /android
+
+# enrichment pipeline raw page cache (re-fetchable)
+data/enrichment/.wikisource-cache/

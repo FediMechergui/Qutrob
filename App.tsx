@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
-import * as Updates from "expo-updates";
+import {
+  checkAndDownloadUpdate,
+  applyDownloadedUpdate,
+} from "./src/services/updates";
 import { HomeScreen, GameScreen, QutrabScreen } from "./src/screens";
 import { WelcomeScreen } from "./src/screens/WelcomeScreen";
 import { VideoRewardScreen } from "./src/screens/VideoRewardScreen";
@@ -38,19 +41,19 @@ export default function App() {
     checkForOtaUpdate();
   }, []);
 
-  // OTA updates: fetch and apply new JS bundles published via `eas update`
-  // without requiring a store release. No-op in development and on web.
+  // OTA updates: silently fetch and apply new JS bundles published via
+  // `eas update`. No-op in development and on web; never blocks the UI.
+  // (Players can also pull updates on demand from the Home screen.)
   const checkForOtaUpdate = async () => {
-    if (__DEV__ || !Updates.isEnabled) return;
-    try {
-      const update = await Updates.checkForUpdateAsync();
-      if (update.isAvailable) {
-        await Updates.fetchUpdateAsync();
-        await Updates.reloadAsync();
+    const result = await checkAndDownloadUpdate();
+    if (result.status === "downloaded") {
+      try {
+        await applyDownloadedUpdate();
+      } catch (e) {
+        console.warn("OTA reload failed:", e);
       }
-    } catch (e) {
-      // Never block or crash the app because an update check failed
-      console.warn("OTA update check failed:", e);
+    } else if (result.status === "error") {
+      console.warn("OTA update check failed:", result.message);
     }
   };
 

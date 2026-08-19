@@ -6,6 +6,7 @@ import {
 import {
   isValidRoot,
   hasAnnotation,
+  getLisanExcerpt,
   LISAN_ONLY_ROOTS,
   ROOTS_BY_DIFFICULTY,
 } from "../../data/arabicDatabase";
@@ -58,8 +59,10 @@ describe("generateRoundData", () => {
     const lisanOnly = new Set(LISAN_ONLY_ROOTS);
     const round = generateRoundData("hard", used);
     expect(lisanOnly.has(round.usedKey)).toBe(true);
-    expect(round.hasExplanation).toBe(false);
-    // Validity is still asserted for Lisān-only roots
+    expect(hasAnnotation(round.usedKey)).toBe(false);
+    // hasExplanation is true exactly when Lisān's own text is available
+    expect(round.hasExplanation).toBe(!!getLisanExcerpt(round.usedKey));
+    // Validity is still asserted, and the message cites Lisān
     expect(round.validRoots).toContain(round.usedKey);
     expect(round.successMessages[round.usedKey]).toContain("لسان العرب");
   });

@@ -47,12 +47,14 @@ describe("generated data is in sync with the build", () => {
       roots: fs.readFileSync(path.join(outDir, "roots.json"), "utf8"),
       entries: fs.readFileSync(path.join(outDir, "rootEntries.json"), "utf8"),
       aliases: fs.readFileSync(path.join(outDir, "rootAliases.json"), "utf8"),
+      excerpts: fs.readFileSync(path.join(outDir, "lisanExcerpts.json"), "utf8"),
     };
     build();
     const after = {
       roots: fs.readFileSync(path.join(outDir, "roots.json"), "utf8"),
       entries: fs.readFileSync(path.join(outDir, "rootEntries.json"), "utf8"),
       aliases: fs.readFileSync(path.join(outDir, "rootAliases.json"), "utf8"),
+      excerpts: fs.readFileSync(path.join(outDir, "lisanExcerpts.json"), "utf8"),
     };
     expect(after).toEqual(before);
   });

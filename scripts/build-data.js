@@ -58,6 +58,19 @@ function loadJson(name) {
   return JSON.parse(fs.readFileSync(path.join(DATA, name), "utf8"));
 }
 
+/** Lisān al-ʿArab excerpts produced by scripts/enrich-lisan.js (optional). */
+function loadLisanExcerpts() {
+  const file = path.join(DATA, "enrichment", "lisan-excerpts.json");
+  if (!fs.existsSync(file)) return {};
+  const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  const out = {};
+  for (const [root, v] of Object.entries(raw)) {
+    const key = normalizeRoot(root);
+    if (key.length === 3 && v && v.excerpt) out[key] = v.excerpt;
+  }
+  return out;
+}
+
 function loadLisanRoots() {
   const csv = fs
     .readFileSync(path.join(DATA, "external", "lisan345", "lisan3.csv"), "utf8")
@@ -225,6 +238,21 @@ function build() {
   const roots = [
     ...new Set([...lisan, ...annotated, ...Object.keys(aliases)]),
   ].sort();
+  const rootSet = new Set(roots);
+
+  // Second annotation layer: Lisān al-ʿArab excerpts (Wikisource). Emitted as a
+  // separate file; the app synthesises an entry from the excerpt for roots
+  // without a hand-written annotation, and shows "جاء في لسان العرب" for the rest.
+  const excerpts = loadLisanExcerpts();
+  const lisanExcerpts = {};
+  let enrichedFromLisan = 0;
+  for (const [root, excerpt] of Object.entries(excerpts)) {
+    if (!rootSet.has(root)) continue;
+    lisanExcerpts[root] = excerpt;
+    if (!entries[root]) enrichedFromLisan++;
+  }
+  stats.lisanExcerptRoots = Object.keys(lisanExcerpts).length;
+  stats.enrichedFromLisan = enrichedFromLisan;
 
   stats.droppedNotInLisan = droppedRoots.size;
   stats.droppedSample = [...droppedRoots].slice(0, 30);
@@ -232,6 +260,9 @@ function build() {
   stats.lisanRoots = lisan.size;
   stats.annotatedRoots = annotated.size;
   stats.lisanOnly = [...lisan].filter((r) => !annotated.has(r)).length;
+  stats.unexplainedRoots = roots.filter(
+    (r) => !entries[r] && !aliases[r] && !lisanExcerpts[r]
+  ).length;
   stats.totalRoots = roots.length;
   stats.byDifficulty = { easy: 0, medium: 0, hard: 0 };
   for (const e of Object.values(entries)) stats.byDifficulty[e.difficulty]++;
@@ -251,6 +282,7 @@ function build() {
   write("roots.json", roots);
   write("rootEntries.json", entries);
   write("rootAliases.json", aliases);
+  write("lisanExcerpts.json", lisanExcerpts);
   write("stats.json", stats);
 
   return stats;

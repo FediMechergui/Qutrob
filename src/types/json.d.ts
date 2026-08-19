@@ -27,3 +27,8 @@ declare module '*/generated/rootEntries.json' {
   const value: Record<string, GeneratedRootEntry>;
   export default value;
 }
+
+declare module '*/generated/lisanExcerpts.json' {
+  const value: Record<string, string>;
+  export default value;
+}

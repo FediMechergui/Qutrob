@@ -20,6 +20,8 @@ import {
   HintModal,
   ScoreBoard,
   RootDefinitionModal,
+  LevelDiveModal,
+  DiveSection,
 } from "../components";
 import { ClamCard } from "../components/ClamCard";
 import {
@@ -35,7 +37,12 @@ import {
   ARABIC_PROVERBS,
   Difficulty,
 } from "../services/arabicApi";
-import { getRootInfo, canonicalRoot } from "../data/arabicDatabase";
+import {
+  getRootInfo,
+  canonicalRoot,
+  getLisanExcerpt,
+  RootInfoSource,
+} from "../data/arabicDatabase";
 import ahsantJson from "../../data/أحسنت.json";
 import {
   saveRootsSession,
@@ -140,6 +147,12 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const [clamCardDescription, setClamCardDescription] = useState("");
   const [clamCardNotes, setClamCardNotes] = useState<string[]>([]);
 
+  // Level-complete "pearl": what was learned this level + the dive-deeper view
+  const [levelRoots, setLevelRoots] = useState<string[]>([]);
+  const [levelFact, setLevelFact] = useState<any | null>(null);
+  const [showLevelDive, setShowLevelDive] = useState(false);
+  const [levelCardSaved, setLevelCardSaved] = useState(false);
+
   // Definition modal state (click to show)
   const [showDefinitionModal, setShowDefinitionModal] = useState(false);
   const [definitionRoot, setDefinitionRoot] = useState("");
@@ -150,6 +163,10 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const [definitionDifficulty, setDefinitionDifficulty] = useState<
     "easy" | "medium" | "hard" | undefined
   >(undefined);
+  const [definitionSource, setDefinitionSource] = useState<RootInfoSource>("none");
+  const [definitionLisan, setDefinitionLisan] = useState<string | undefined>(
+    undefined
+  );
 
   // Animation
   const fadeAnim = useState(new Animated.Value(0))[0];
@@ -382,6 +399,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         );
         setDefinitionPoetry(roundData.poetryExamples[root]);
         setDefinitionDifficulty(roundData.difficulty || difficulty);
+        setDefinitionSource(getRootInfo(root)?.source ?? "none");
+        setDefinitionLisan(getLisanExcerpt(root));
         setShowDefinitionModal(true);
       }
     },
@@ -401,6 +420,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     const newScore = score + result.pointsEarned;
 
     setScore(newScore);
+
+    // Remember every valid root of this round for the level's pearl card
+    if (roundData) {
+      setLevelRoots((prev) => {
+        const next = [...prev];
+        for (const r of roundData.validRoots) if (!next.includes(r)) next.push(r);
+        return next;
+      });
+    }
 
     // Update streak
     let newStreak = streak;
@@ -444,12 +472,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         roundData.successMessages?.[validRoot] || rootInfo?.successMessage || "";
       const rootMeaning = roundData.meanings?.[validRoot] || rootInfo?.meaning || "";
 
-      // Unlockable card built from the annotated entry (only when one exists)
+      // Unlockable card: from the annotation, or from the Lisān excerpt
       const unlockableCard =
-        rootInfo && !rootInfo.isLisanOnly
+        rootInfo && rootInfo.meaning
           ? {
               id: `root-${canonicalRoot(validRoot)}`,
-              title: `📜 ${validRoot}`,
+              title:
+                rootInfo.source === "lisan"
+                  ? `📖 ${validRoot} — من لسان العرب`
+                  : `📜 ${validRoot}`,
               description: rootInfo.meaning || analysis,
               notes: [
                 rootInfo.hint && rootInfo.hint !== rootInfo.meaning
@@ -507,6 +538,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         await saveCompletedLevel(playerId, "roots", level.toString());
         await saveGameHistory(playerId, "roots", score, streak, level);
       }
+      // Pick this level's «هل تعلم» fact once so the pearl stays stable
+      setLevelFact(pickRandom(ahsant) ?? null);
+      setLevelCardSaved(false);
       setShowClamPopup(false);
       setShowLevelComplete(true);
     } else {
@@ -522,11 +556,74 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     playerId,
     score,
     streak,
+    ahsant,
   ]);
+
+  // Sections of the level's dive-deeper card (built lazily from state)
+  const buildLevelDiveSections = useCallback((): DiveSection[] => {
+    const sections: DiveSection[] = [
+      {
+        heading: "📜 المثل",
+        body: currentProverb.text,
+        quote: currentProverb.meaning,
+      },
+    ];
+    if (levelFact) {
+      sections.push({
+        heading: `💡 هل تعلم؟ ${levelFact.title || ""}`.trim(),
+        body: Array.isArray(levelFact.content)
+          ? levelFact.content.join("\n")
+          : String(levelFact.content || ""),
+      });
+    }
+    if (levelRoots.length > 0) {
+      sections.push({
+        heading: `🌱 جذور هذا المستوى (${levelRoots.length})`,
+        items: levelRoots.map((root) => {
+          const info = getRootInfo(root);
+          const meaning = info?.meaning || "جذر صحيح ورد في لسان العرب";
+          return {
+            title: root,
+            text: meaning.length > 160 ? meaning.slice(0, 157) + "…" : meaning,
+            note:
+              info?.source === "lisan"
+                ? "من لسان العرب"
+                : info?.poetryExample
+                ? `📜 ${info.poetryExample}`
+                : undefined,
+          };
+        }),
+      });
+    }
+    return sections;
+  }, [currentProverb, levelFact, levelRoots]);
+
+  // Save the level's pearl as a card in البطاقات
+  const handleSaveLevelCard = useCallback(async () => {
+    if (!playerId || levelCardSaved) return;
+    try {
+      await unlockCard(playerId, {
+        id: `pearl-roots-L${level}-${(level - 1) % LEVEL_PROVERBS.length}`,
+        title: `🦪 لؤلؤة المستوى ${level} — ${currentProverb.text}`,
+        description: currentProverb.meaning,
+        notes: [
+          levelFact ? `💡 ${levelFact.title}` : null,
+          levelRoots.length ? `🌱 ${levelRoots.join("، ")}` : null,
+        ].filter(Boolean) as string[],
+      });
+      const unlocked = await getUnlockedCards(playerId);
+      setUnlockedCardsState(unlocked);
+      setLevelCardSaved(true);
+    } catch (e) {
+      console.error("Error saving level card:", e);
+    }
+  }, [playerId, levelCardSaved, level, currentProverb, levelFact, levelRoots]);
 
   // Handle next level - difficulty follows the level progression
   const handleNextLevel = useCallback(async () => {
     setShowLevelComplete(false);
+    setShowLevelDive(false);
+    setLevelRoots([]);
 
     const nextLevel = level + 1;
     const nextDifficulty = difficultyForLevel(nextLevel);
@@ -761,6 +858,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
               isOpen={true}
               proverb={currentProverb.text}
               proverbMeaning={currentProverb.meaning || ""}
+              onDive={() => setShowLevelDive(true)}
+              diveLabel="اغطس لتعرف المزيد"
             />
 
             <View style={styles.levelScoreContainer}>
@@ -774,6 +873,16 @@ export const GameScreen: React.FC<GameScreenProps> = ({
             >
               <Text style={styles.nextLevelButtonText}>المستوى التالي ←</Text>
             </TouchableOpacity>
+
+            <LevelDiveModal
+              visible={showLevelDive}
+              title={`لؤلؤة المستوى ${level}`}
+              subtitle={`${difficultyConfig.nameAr} · ${levelRoots.length} جذر`}
+              sections={buildLevelDiveSections()}
+              onClose={() => setShowLevelDive(false)}
+              onSaveCard={playerId ? handleSaveLevelCard : undefined}
+              cardSaved={levelCardSaved}
+            />
           </ScrollView>
         </SafeAreaView>
       </LinearGradient>
@@ -988,7 +1097,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
               <Text style={styles.tapHintText}>
                 {roundData?.hasExplanation
                   ? "اضغط على الجذر لمعرفة معناه"
-                  : "جذر نادر من لسان العرب — اضغط عليه للتأكيد"}
+                  : "جذر نادر ورد في لسان العرب — اضغط عليه للتأكيد"}
               </Text>
             </View>
           )}
@@ -1104,6 +1213,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           meaning={definitionMeaning}
           poetryExample={definitionPoetry}
           difficulty={definitionDifficulty}
+          source={definitionSource}
+          lisanExcerpt={definitionLisan}
           onClose={() => setShowDefinitionModal(false)}
         />
 

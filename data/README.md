@@ -23,3 +23,22 @@ The build step:
    * `roots.json` — sorted array of every valid triliteral root (lisan345 ∪ annotated).
    * `rootEntries.json` — `{ root: { meaning, hint, examples, difficulty, successMessage, poetryExample } }`.
    * `stats.json` — counts used by tests and the README.
+
+## Enrichment: Lisān al-ʿArab excerpts (`enrichment/lisan-excerpts.json`)
+
+Produced by `npm run enrich:lisan` (`scripts/enrich-lisan.js`). The Arabic
+Wikisource hosts Ibn Manẓūr's لسان العرب as ~99 range pages with one section per
+root; the script downloads them through the MediaWiki API (cached locally in
+`enrichment/.wikisource-cache/`, git-ignored), indexes the sections by
+normalised root, and stores the opening excerpt (≈280 chars, cut at a sentence
+boundary) of every triliteral root — 4,000+ roots.
+
+`build-data.js` emits them as `src/data/generated/lisanExcerpts.json`. In the
+app, a root with no hand-written annotation but with an excerpt shows the
+dictionary's own words («جاء في لسان العرب») — sourced text, nothing generated.
+Annotated roots show the excerpt as extra context in the definition modal and
+the level-end dive card.
+
+Source: https://ar.wikisource.org/wiki/لسان_العرب (public-domain text,
+Wikisource transcription CC BY-SA). Coverage depends on what volunteers have
+transcribed; re-run the script periodically to pick up new pages.

@@ -21,6 +21,10 @@ interface RootDefinitionModalProps {
   poetryExample?: string;
   onClose: () => void;
   difficulty?: 'easy' | 'medium' | 'hard';
+  /** Where the meaning comes from: hand annotation, Lisān excerpt, or none. */
+  source?: 'annotated' | 'lisan' | 'none';
+  /** The root's Lisān al-ʿArab excerpt, shown as extra context when the meaning is annotated. */
+  lisanExcerpt?: string;
 }
 
 export const RootDefinitionModal: React.FC<RootDefinitionModalProps> = ({
@@ -30,6 +34,8 @@ export const RootDefinitionModal: React.FC<RootDefinitionModalProps> = ({
   poetryExample,
   onClose,
   difficulty,
+  source = 'annotated',
+  lisanExcerpt,
 }) => {
   return (
     <Modal
@@ -70,9 +76,26 @@ export const RootDefinitionModal: React.FC<RootDefinitionModalProps> = ({
             >
               {/* Meaning */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>📖 المعنى</Text>
+                <Text style={styles.sectionTitle}>
+                  {source === 'lisan' ? '📖 جاء في لسان العرب' : '📖 المعنى'}
+                </Text>
                 <Text style={styles.meaningText}>{meaning}</Text>
+                {source === 'lisan' && (
+                  <Text style={styles.sourceNote}>
+                    نص ابن منظور كما ورد في لسان العرب (ويكي مصدر)
+                  </Text>
+                )}
               </View>
+
+              {/* Lisān excerpt alongside a hand-written meaning */}
+              {source === 'annotated' && lisanExcerpt && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>📚 في لسان العرب</Text>
+                  <View style={styles.lisanBox}>
+                    <Text style={styles.lisanText}>{lisanExcerpt}</Text>
+                  </View>
+                </View>
+              )}
 
               {/* Poetry Example */}
               {poetryExample && (
@@ -173,6 +196,28 @@ const styles = StyleSheet.create({
     fontSize: scaleFontSize(isSmallDevice ? 15 : 17),
     color: COLORS.inkBrown,
     lineHeight: isSmallDevice ? 24 : 28,
+    textAlign: 'right',
+    ...FONTS.arabicText,
+  },
+  sourceNote: {
+    fontSize: scaleFontSize(11),
+    color: COLORS.textSecondary,
+    textAlign: 'right',
+    marginTop: SPACING.xs,
+    fontStyle: 'italic',
+    ...FONTS.arabicText,
+  },
+  lisanBox: {
+    backgroundColor: COLORS.parchmentLight,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    borderRightWidth: 3,
+    borderRightColor: COLORS.turquoise,
+  },
+  lisanText: {
+    fontSize: scaleFontSize(isSmallDevice ? 13 : 15),
+    color: COLORS.inkBrown,
+    lineHeight: isSmallDevice ? 22 : 26,
     textAlign: 'right',
     ...FONTS.arabicText,
   },

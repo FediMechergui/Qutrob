@@ -13,7 +13,6 @@ import {
   findValidRoots,
   getRandomLetters,
   getLettersWithValidRoots,
-  hasAnnotation,
   normalizeRoot,
   ROOTS_BY_DIFFICULTY,
   LISAN_ONLY_ROOTS,
@@ -158,7 +157,8 @@ export function generateRoundData(
     poetryExamples,
     difficulty: sourceInfo?.difficulty ?? difficulty,
     usedKey: sourceRoot,
-    hasExplanation: hasAnnotation(sourceRoot),
+    // Either a hand-written annotation or the root's Lisān excerpt
+    hasExplanation: !!sourceInfo?.meaning,
   };
 }
 

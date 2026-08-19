@@ -8,6 +8,7 @@ import {
   canonicalRoot,
   normalizeRoot,
   hasAnnotation,
+  getLisanExcerpt,
   generateAllPermutations,
   findValidRoots,
   getRandomLetters,
@@ -88,6 +89,37 @@ describe("normalisation & aliases", () => {
   });
 });
 
+describe("Lisān al-ʿArab excerpt layer", () => {
+  it("covers thousands of roots, including most previously unexplained ones", () => {
+    expect((stats as any).lisanExcerptRoots).toBeGreaterThan(3000);
+    expect((stats as any).enrichedFromLisan).toBeGreaterThan(1500);
+    expect((stats as any).unexplainedRoots).toBeLessThan(1500);
+  });
+
+  it("returns the dictionary's own words for an annotated root too", () => {
+    const excerpt = getLisanExcerpt("أبد");
+    expect(excerpt).toBeDefined();
+    expect(excerpt!.length).toBeGreaterThan(20);
+  });
+
+  it("synthesises a 'lisan' entry for roots with an excerpt but no annotation", () => {
+    const root = LISAN_ONLY_ROOTS.find((r) => getLisanExcerpt(r));
+    expect(root).toBeDefined();
+    const info = getRootInfo(root!);
+    expect(info!.source).toBe("lisan");
+    expect(info!.meaning).toBe(getLisanExcerpt(root!));
+    expect(info!.successMessage).toContain("لسان العرب");
+    expect(info!.isLisanOnly).toBe(true);
+  });
+
+  it("still reports 'none' honestly when no excerpt is transcribed", () => {
+    const root = LISAN_ONLY_ROOTS.find((r) => !getLisanExcerpt(r));
+    expect(root).toBeDefined();
+    expect(getRootInfo(root!)!.source).toBe("none");
+    expect(getRootInfo(root!)!.meaning).toBe("");
+  });
+});
+
 describe("getRootInfo", () => {
   it("returns a full annotation for annotated roots", () => {
     const info = getRootInfo("أبد");
@@ -97,11 +129,12 @@ describe("getRootInfo", () => {
     expect(hasAnnotation("أبد")).toBe(true);
   });
 
-  it("returns an honest minimal entry for Lisān-only roots (never invents a meaning)", () => {
-    const root = LISAN_ONLY_ROOTS[0];
+  it("returns an honest minimal entry for untranscribed Lisān-only roots (never invents a meaning)", () => {
+    const root = LISAN_ONLY_ROOTS.find((r) => !getLisanExcerpt(r))!;
     const info = getRootInfo(root);
     expect(info).not.toBeNull();
     expect(info!.isLisanOnly).toBe(true);
+    expect(info!.source).toBe("none");
     expect(info!.meaning).toBe("");
     expect(info!.successMessage).toContain("لسان العرب");
     expect(hasAnnotation(root)).toBe(false);

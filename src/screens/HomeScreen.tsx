@@ -9,7 +9,14 @@ import {
   Dimensions,
   ScrollView,
   Modal,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
+import {
+  checkAndDownloadUpdate,
+  applyDownloadedUpdate,
+  getVersionInfo,
+} from "../services/updates";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   COLORS,
@@ -66,10 +73,60 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [totalStreak, setTotalStreak] = useState(0);
   const [unlockedCards, setUnlockedCards] = useState<UnlockedCard[]>([]);
   const [showUnlockedModal, setShowUnlockedModal] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const versionInfo = getVersionInfo();
 
   useEffect(() => {
     loadData();
   }, [playerId, refreshKey]);
+
+  // «تحديثات»: let the player pull the latest OTA update on demand
+  const handleCheckForUpdates = async () => {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    try {
+      const result = await checkAndDownloadUpdate();
+      switch (result.status) {
+        case "unavailable":
+          Alert.alert("التحديثات", result.reason);
+          break;
+        case "up-to-date":
+          Alert.alert(
+            "لا توجد تحديثات",
+            `أنت تستخدم أحدث إصدار (v${versionInfo.appVersion}).`
+          );
+          break;
+        case "downloaded":
+          Alert.alert(
+            "تم تنزيل التحديث ✅",
+            "سيُعاد تشغيل اللعبة الآن لتطبيق التعديلات الجديدة.",
+            [
+              {
+                text: "إعادة التشغيل",
+                onPress: () => {
+                  applyDownloadedUpdate().catch(() => {
+                    Alert.alert(
+                      "تنبيه",
+                      "تعذّر إعادة التشغيل تلقائياً. أغلق اللعبة وافتحها من جديد لتطبيق التحديث."
+                    );
+                  });
+                },
+              },
+            ],
+            { cancelable: false }
+          );
+          break;
+        case "error":
+          Alert.alert(
+            "تعذّر التحقق من التحديثات",
+            "تأكد من اتصالك بالإنترنت ثم حاول مرة أخرى.\n\n" + result.message
+          );
+          break;
+      }
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   const loadData = async () => {
     if (!playerId) return;
@@ -277,6 +334,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   </Text>
                 </TouchableOpacity>
               )}
+
+              {/* Updates button — pull the latest OTA release on demand */}
+              <TouchableOpacity
+                style={[styles.updateButton, checkingUpdate && styles.updateButtonBusy]}
+                onPress={handleCheckForUpdates}
+                disabled={checkingUpdate}
+                activeOpacity={0.8}
+              >
+                {checkingUpdate ? (
+                  <ActivityIndicator size="small" color={COLORS.inkBrown} />
+                ) : (
+                  <Text style={styles.updateButtonText}>⬇️ تنزيل التحديثات</Text>
+                )}
+                <Text style={styles.updateButtonHint}>
+                  الإصدار {versionInfo.appVersion}
+                  {versionInfo.updateId
+                    ? ` · تحديث ${versionInfo.updateId.slice(0, 8)}`
+                    : versionInfo.isEmbedded
+                    ? " · الإصدار المضمّن"
+                    : ""}
+                </Text>
+              </TouchableOpacity>
 
               {/* Footer with Islamic Pattern hint */}
               <View style={styles.footer}>
@@ -653,6 +732,32 @@ const styles = StyleSheet.create({
   archiveButtonText: {
     fontSize: scaleFontSize(12),
     color: COLORS.inkBrown,
+    ...FONTS.arabicText,
+  },
+  updateButton: {
+    width: "100%",
+    backgroundColor: COLORS.parchmentDark,
+    paddingVertical: COMPACT_SPACING.xs,
+    borderRadius: BORDER_RADIUS.sm,
+    alignItems: "center",
+    marginTop: COMPACT_SPACING.xs,
+    borderWidth: 1,
+    borderColor: COLORS.turquoise,
+    minHeight: 40,
+    justifyContent: "center",
+  },
+  updateButtonBusy: {
+    opacity: 0.7,
+  },
+  updateButtonText: {
+    fontSize: scaleFontSize(12),
+    color: COLORS.turquoise,
+    ...FONTS.arabicTitle,
+  },
+  updateButtonHint: {
+    fontSize: scaleFontSize(9),
+    color: COLORS.textSecondary,
+    marginTop: 1,
     ...FONTS.arabicText,
   },
   unlockedOverlay: {
